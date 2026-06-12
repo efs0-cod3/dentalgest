@@ -1,6 +1,8 @@
 import { createRequestHandler } from "@react-router/node";
+import * as build from "../build/server/index.js";
 
 export default createRequestHandler({
-  build: () => import("../build/server/index.js"),
+  // @ts-ignore — build types generated at build time
+  build,
   mode: process.env.NODE_ENV ?? "production",
 });
