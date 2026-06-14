@@ -44,16 +44,16 @@ const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]
 
 // ─── SVG constants ────────────────────────────────────────────────────────────
 
-const S = 38      // tooth size
-const IN = 9      // inset for center zone
-const STEP = S + 3
-const CGAP = 14   // center (midline) gap
-const LH = 13     // label height
+const S = 48      // tooth size
+const IN = 11     // inset for center zone
+const STEP = S + 4
+const CGAP = 16   // center (midline) gap
+const LH = 15     // label height
 
 function tx(i: number) { return i * STEP + (i >= 8 ? CGAP : 0) }
 
 const VW = tx(15) + S       // total svg width
-const VH = LH + S + 18 + S + LH  // total svg height
+const VH = LH + S + 28 + S + LH  // total svg height
 
 const emptyDiente = (): DienteData => ({ v: 'sano', m: 'sano', d: 'sano', p: 'sano', o: 'sano' })
 
@@ -79,7 +79,7 @@ function Tooth({ id, data, x, y, labelTop, readOnly, onSurface, active }: ToothP
       {/* Number label */}
       <text
         x={S / 2} y={labelTop ? -3 : S + 11}
-        textAnchor="middle" fontSize={7.5} fontFamily="monospace"
+        textAnchor="middle" fontSize={9} fontFamily="monospace"
         fill={active ? '#2563EB' : '#9CA3AF'}
         fontWeight={active ? '700' : '400'}
       >{id}</text>
@@ -166,7 +166,7 @@ export function Odontograma({ value, onChange, readOnly = false }: OdontogramaPr
   }, [brush, value, onChange])
 
   const upperY = LH
-  const lowerY = LH + S + 18
+  const lowerY = LH + S + 28
 
   return (
     <div className="space-y-3">
@@ -194,10 +194,11 @@ export function Odontograma({ value, onChange, readOnly = false }: OdontogramaPr
       )}
 
       {/* SVG odontogram */}
-      <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white px-4 py-5">
+      <div className="rounded-xl border border-gray-200 bg-white px-4 py-6">
         <svg
-          viewBox={`-2 -${LH + 4} ${VW + 4} ${VH + 8}`}
-          style={{ minWidth: 560, width: '100%', maxWidth: 760, display: 'block', margin: '0 auto' }}
+          viewBox={`-2 -${LH + 6} ${VW + 4} ${VH + 36}`}
+          width="100%"
+          style={{ display: 'block' }}
         >
           {/* SUPERIOR label */}
           <text x={VW / 2} y={-LH - 1} textAnchor="middle" fontSize={8.5} fill="#C4C9D4" fontWeight="600" letterSpacing="1.5">
@@ -236,10 +237,14 @@ export function Odontograma({ value, onChange, readOnly = false }: OdontogramaPr
       </div>
 
       {/* Surfaces legend */}
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-[10px] text-gray-400">
-        <span className="font-semibold text-gray-500 mr-1">Superficies:</span>
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        <span className="text-xs font-semibold text-gray-500 shrink-0">Superficies:</span>
         {[['V', 'Vestibular'], ['P', 'Palatino/Lingual'], ['M', 'Mesial'], ['D', 'Distal'], ['O', 'Oclusal/Incisal']].map(([k, v]) => (
-          <span key={k}><strong className="text-gray-600">{k}</strong> {v}</span>
+          <span key={k} className="inline-flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-md px-2 py-0.5 text-xs text-gray-700">
+            <strong className="font-bold text-gray-900">{k}</strong>
+            <span className="text-gray-500">·</span>
+            {v}
+          </span>
         ))}
       </div>
 

@@ -10,8 +10,8 @@ import { cn } from '~/lib/utils'
 
 // ─── Meta ─────────────────────────────────────────────────────────────────────
 
-export function meta({ data }: Route.MetaArgs) {
-  const name = (data as any)?.paciente?.nombre ?? 'Paciente'
+export function meta({ loaderData }: Route.MetaArgs) {
+  const name = (loaderData as any)?.paciente?.nombre ?? 'Paciente'
   return [{ title: `Odontograma — ${name} — Nin Dental` }]
 }
 
@@ -34,12 +34,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       .select('id, datos, notas, updated_at')
       .eq('paciente_id', pacienteId)
       .eq('clinica_id', clinicaId)
-      .maybeSingle(),
+      .order('created_at', { ascending: true })
+      .limit(1),
   ])
+
+  const odontogramaRow = Array.isArray(odontograma) ? odontograma[0] ?? null : odontograma
 
   return {
     paciente: paciente as { id: string; nombre: string; fecha_nacimiento: string | null; tipo_sangre: string | null } | null,
-    odontograma: odontograma as { id: string; datos: OdontogramaData; notas: string | null; updated_at: string } | null,
+    odontograma: odontogramaRow as { id: string; datos: OdontogramaData; notas: string | null; updated_at: string } | null,
   }
 }
 
@@ -53,19 +56,29 @@ export async function action({ request, params }: Route.ActionArgs) {
 
   const datos: OdontogramaData = JSON.parse(fd.get('datos') as string)
   const notas = (fd.get('notas') as string) ?? ''
-  const existingId = fd.get('odontograma_id') as string | null
 
-  if (existingId) {
-    await supabase
-      .from('odontogramas')
-      .update({ datos, notas, updated_at: new Date().toISOString() })
-      .eq('id', existingId)
-  } else {
-    await supabase
-      .from('odontogramas')
-      .insert({ paciente_id: pacienteId, clinica_id: clinicaId, datos, notas })
-  }
+  const { data: rows, error: findError } = await supabase
+    .from('odontogramas')
+    .select('id')
+    .eq('paciente_id', pacienteId)
+    .eq('clinica_id', clinicaId)
+    .order('created_at', { ascending: true })
+    .limit(1)
 
+  const existing = rows?.[0] ?? null
+
+  if (findError) return { ok: false, error: findError.message }
+
+  const { error } = existing
+    ? await supabase
+        .from('odontogramas')
+        .update({ datos, notas, updated_at: new Date().toISOString() })
+        .eq('id', existing.id)
+    : await supabase
+        .from('odontogramas')
+        .insert({ paciente_id: pacienteId, clinica_id: clinicaId, datos, notas })
+
+  if (error) return { ok: false, error: error.message }
   return { ok: true, ts: Date.now() }
 }
 
@@ -79,15 +92,15 @@ export default function OdontogramaPage() {
   const [notas, setNotas] = useState(odontograma?.notas ?? '')
 
   const saving = fetcher.state !== 'idle'
-  const saved = fetcher.data?.ok === true && fetcher.state === 'idle'
+  const fetcherData = fetcher.data as { ok: boolean; error?: string } | undefined
+  const saved = fetcherData?.ok === true && fetcher.state === 'idle'
+  const saveError = fetcherData?.ok === false ? fetcherData.error : null
 
   function handleSave() {
-    const form: Record<string, string> = {
-      datos: JSON.stringify(data),
-      notas,
-    }
-    if (odontograma?.id) form.odontograma_id = odontograma.id
-    fetcher.submit(form, { method: 'post' })
+    fetcher.submit(
+      { datos: JSON.stringify(data), notas },
+      { method: 'post' }
+    )
   }
 
   return (
@@ -122,6 +135,9 @@ export default function OdontogramaPage() {
             <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
               <CheckCircle size={13} /> Guardado
             </span>
+          )}
+          {saveError && (
+            <span className="text-xs text-red-500 font-medium">Error: {saveError}</span>
           )}
           <button
             onClick={handleSave}
