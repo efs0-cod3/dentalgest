@@ -1,11 +1,11 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Form, useLoaderData, useNavigation } from 'react-router'
+import { Form, useLoaderData, useNavigation, Link } from 'react-router'
 import type { Route } from './+types/pacientes'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import {
   Plus, X, Pencil, Trash2, Search, User, Phone, Mail, Clock,
-  FileText, Upload, Image, File, AlertCircle, Heart, Stethoscope,
+  FileText, Upload, Image, File, AlertCircle, Heart, Stethoscope, Grid3x3,
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 
@@ -470,6 +470,13 @@ function PacienteDetalleModal({ paciente, doctores, onClose, onEdit }: {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              to={`/dashboard/odontograma/${paciente.id}`}
+              onClick={onClose}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+            >
+              <Grid3x3 size={13} /> Odontograma
+            </Link>
             <button onClick={onEdit} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
               <Pencil size={13} /> Editar
             </button>
