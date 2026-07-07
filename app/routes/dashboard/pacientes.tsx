@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { Form, useLoaderData, useNavigation, Link } from 'react-router'
+import { Form, useLoaderData, useNavigation, useSubmit, Link } from 'react-router'
 import type { Route } from './+types/pacientes'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
@@ -8,6 +8,7 @@ import {
   FileText, Upload, Image, File, AlertCircle, Heart, Stethoscope, Grid3x3,
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
+import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -271,9 +272,12 @@ function PacienteEditModal({ paciente, onClose }: { paciente: Paciente | null; o
 
 function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doctor[] }) {
   const [showForm, setShowForm] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<ExpedienteEntrada | null>(null)
   const navigation = useNavigation()
+  const submit = useSubmit()
   const isSubmitting = navigation.state === 'submitting'
   useEffect(() => { if (navigation.state === 'idle' && navigation.formData) setShowForm(false) }, [navigation.state])
+  useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
   return (
     <div className="space-y-4">
@@ -346,14 +350,22 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
                 {fmtDateTime(e.fecha)}{e.doctores ? ` · ${e.doctores.nombre}` : ''}
               </p>
             </div>
-            <Form method="post" onSubmit={ev => { if (!confirm('¿Eliminar esta entrada?')) ev.preventDefault() }}>
-              <input type="hidden" name="intent" value="delete-entrada" />
-              <input type="hidden" name="id" value={e.id} />
-              <button type="submit" className="p-1 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
-            </Form>
+            <button type="button" onClick={() => setDeleteTarget(e)}
+              className="p-1 text-gray-300 hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar entrada clínica"
+          itemLabel={deleteTarget.titulo}
+          description={`${deleteTarget.tipo.charAt(0).toUpperCase() + deleteTarget.tipo.slice(1)} · ${fmtDateTime(deleteTarget.fecha)}${deleteTarget.doctores ? ` · ${deleteTarget.doctores.nombre}` : ''}. Esta acción no se puede deshacer.`}
+          isSubmitting={isSubmitting}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => submit({ intent: 'delete-entrada', id: deleteTarget.id }, { method: 'post' })}
+        />
+      )}
     </div>
   )
 }
@@ -361,8 +373,11 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
 // ─── documentos tab ───────────────────────────────────────────────────────────
 
 function TabDocumentos({ paciente }: { paciente: Paciente }) {
+  const [deleteTarget, setDeleteTarget] = useState<Documento | null>(null)
   const navigation = useNavigation()
+  const submit = useSubmit()
   const isUploading = navigation.state === 'submitting'
+  useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
   return (
     <div className="space-y-4">
@@ -422,17 +437,26 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
                     <p className="text-xs font-medium text-gray-900 truncate">{d.nombre}</p>
                     <p className="text-xs text-gray-400">{fmtDate(d.created_at)}</p>
                   </div>
-                  <Form method="post" onSubmit={e => { if (!confirm('¿Eliminar archivo?')) e.preventDefault() }}>
-                    <input type="hidden" name="intent" value="delete-documento" />
-                    <input type="hidden" name="id" value={d.id} />
-                    <input type="hidden" name="storage_path" value={d.storage_path} />
-                    <button type="submit" className="p-1 text-gray-300 hover:text-red-500 flex-shrink-0 transition-colors"><Trash2 size={13} /></button>
-                  </Form>
+                  <button type="button" onClick={() => setDeleteTarget(d)}
+                    className="p-1 text-gray-300 hover:text-red-500 flex-shrink-0 transition-colors"><Trash2 size={13} /></button>
                 </div>
               </div>
             )
           })}
         </div>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar archivo"
+          itemLabel={deleteTarget.nombre}
+          description={`Subido el ${fmtDate(deleteTarget.created_at)}. Se eliminará también del almacenamiento y no se puede deshacer.`}
+          isSubmitting={navigation.state === 'submitting'}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => submit({
+            intent: 'delete-documento', id: deleteTarget.id, storage_path: deleteTarget.storage_path,
+          }, { method: 'post' })}
+        />
       )}
     </div>
   )
@@ -444,6 +468,11 @@ function PacienteDetalleModal({ paciente, doctores, onClose, onEdit }: {
   paciente: Paciente; doctores: Doctor[]; onClose: () => void; onEdit: () => void
 }) {
   const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'documentos'>('datos')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  const isDeleting = navigation.state === 'submitting'
+  useEffect(() => { if (navigation.state === 'idle') setConfirmDelete(false) }, [navigation.state])
   const TABS = [
     { id: 'datos', label: 'Datos' },
     { id: 'clinico', label: `Clínico${paciente.expediente_entradas.length ? ` (${paciente.expediente_entradas.length})` : ''}` },
@@ -452,6 +481,7 @@ function PacienteDetalleModal({ paciente, doctores, onClose, onEdit }: {
   ] as const
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
       <div className="w-full sm:max-w-2xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
 
@@ -603,16 +633,25 @@ function PacienteDetalleModal({ paciente, doctores, onClose, onEdit }: {
 
         {/* footer delete */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
-          <Form method="post" onSubmit={e => { if (!confirm(`¿Eliminar a ${paciente.nombre}?`)) e.preventDefault() }}>
-            <input type="hidden" name="intent" value="delete" />
-            <input type="hidden" name="id" value={paciente.id} />
-            <button type="submit" className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
-              <Trash2 size={13} /> Eliminar paciente
-            </button>
-          </Form>
+          <button type="button" onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+            <Trash2 size={13} /> Eliminar paciente
+          </button>
         </div>
       </div>
     </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar paciente"
+        itemLabel={paciente.nombre}
+        description={`Se eliminarán también sus ${paciente.citas.length} cita(s), ${paciente.expediente_entradas.length} entrada(s) clínica(s) y ${paciente.documentos.length} documento(s). Esta acción no se puede deshacer.`}
+        isSubmitting={isDeleting}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: 'delete', id: paciente.id }, { method: 'post' })}
+      />
+    )}
+    </>
   )
 }
 
@@ -620,9 +659,13 @@ function PacienteDetalleModal({ paciente, doctores, onClose, onEdit }: {
 
 export default function Pacientes() {
   const { pacientes, doctores } = useLoaderData<typeof loader>()
+  const navigation = useNavigation()
+  const submit = useSubmit()
   const [query, setQuery] = useState('')
   const [detalle, setDetalle] = useState<Paciente | null>(null)
   const [editModal, setEditModal] = useState<{ open: boolean; paciente: Paciente | null }>({ open: false, paciente: null })
+  const [deleteTarget, setDeleteTarget] = useState<Paciente | null>(null)
+  useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase()
@@ -710,11 +753,8 @@ export default function Pacientes() {
                           className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
                           <Pencil size={14} />
                         </button>
-                        <Form method="post" onSubmit={e => { if (!confirm(`¿Eliminar a ${p.nombre}?`)) e.preventDefault() }}>
-                          <input type="hidden" name="intent" value="delete" />
-                          <input type="hidden" name="id" value={p.id} />
-                          <button type="submit" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                        </Form>
+                        <button onClick={() => setDeleteTarget(p)}
+                          className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -762,6 +802,16 @@ export default function Pacientes() {
       )}
       {editModal.open && (
         <PacienteEditModal paciente={editModal.paciente} onClose={() => setEditModal({ open: false, paciente: null })} />
+      )}
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar paciente"
+          itemLabel={deleteTarget.nombre}
+          description={`Se eliminarán también sus ${deleteTarget.citas.length} cita(s), ${deleteTarget.expediente_entradas.length} entrada(s) clínica(s) y ${deleteTarget.documentos.length} documento(s). Esta acción no se puede deshacer.`}
+          isSubmitting={navigation.state === 'submitting'}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => submit({ intent: 'delete', id: deleteTarget.id }, { method: 'post' })}
+        />
       )}
     </div>
   )
