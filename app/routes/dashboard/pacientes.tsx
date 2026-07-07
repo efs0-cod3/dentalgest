@@ -8,6 +8,7 @@ import {
   FileText, Upload, Image, File, AlertCircle, Heart, Stethoscope, Grid3x3,
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
+import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -170,7 +171,7 @@ export async function action({ request }: Route.ActionArgs) {
 function PacienteEditModal({ paciente, onClose }: { paciente: Paciente | null; onClose: () => void }) {
   const navigation = useNavigation()
   const isSubmitting = navigation.state === 'submitting'
-  useEffect(() => { if (navigation.state === 'idle' && navigation.formData) onClose() }, [navigation.state])
+  useCloseOnSubmit(onClose)
 
   const field = (label: string, name: string, type = 'text', props: any = {}) => (
     <div>
@@ -276,7 +277,7 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
   const navigation = useNavigation()
   const submit = useSubmit()
   const isSubmitting = navigation.state === 'submitting'
-  useEffect(() => { if (navigation.state === 'idle' && navigation.formData) setShowForm(false) }, [navigation.state])
+  useCloseOnSubmit(() => setShowForm(false))
   useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
   return (

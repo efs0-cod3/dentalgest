@@ -1,10 +1,12 @@
-import { useState, useMemo, useEffect } from 'react'
-import { Form, useLoaderData, useSearchParams, useNavigation } from 'react-router'
+import { useState, useMemo } from 'react'
+import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit } from 'react-router'
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText } from 'lucide-react'
 import { cn } from '~/lib/utils'
+import { useCloseOnSubmit } from '~/lib/hooks'
+import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
 type Cita = {
   id: string
@@ -125,8 +127,13 @@ function CitaDetalleModal({
   onEdit: () => void
 }) {
   const isPast = new Date(cita.fecha_hora) < new Date()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  useCloseOnSubmit(() => setConfirmDelete(false))
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
       <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden max-h-[95vh] sm:max-h-none flex flex-col">
 
@@ -207,22 +214,28 @@ function CitaDetalleModal({
 
         {/* footer: delete */}
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
-          <Form
-            method="post"
-            onSubmit={e => { if (!confirm('¿Eliminar esta cita?')) e.preventDefault() }}
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
           >
-            <input type="hidden" name="intent" value="delete" />
-            <input type="hidden" name="id" value={cita.id} />
-            <button
-              type="submit"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-            >
-              <Trash2 size={13} /> Eliminar cita
-            </button>
-          </Form>
+            <Trash2 size={13} /> Eliminar cita
+          </button>
         </div>
       </div>
     </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar cita"
+        itemLabel={cita.pacientes?.nombre ?? 'Sin paciente'}
+        description={`${fmtDate(cita.fecha_hora)}${cita.doctores ? ` · ${cita.doctores.nombre}` : ''}${cita.tratamientos ? ` · ${cita.tratamientos.nombre}` : ''}. Esta acción no se puede deshacer.`}
+        isSubmitting={navigation.state === 'submitting'}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: 'delete', id: cita.id }, { method: 'post' })}
+      />
+    )}
+    </>
   )
 }
 
@@ -250,9 +263,7 @@ function CitaModal({
   const [fechaTime, setFechaTime] = useState(initial.slice(11, 16))
   const fechaLocal = fechaDate && fechaTime ? `${fechaDate}T${fechaTime}` : ''
 
-  useEffect(() => {
-    if (navigation.state === 'idle' && navigation.formData) onClose()
-  }, [navigation.state])
+  useCloseOnSubmit(onClose)
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
@@ -411,6 +422,11 @@ function TablaView({
   onDetalle: (c: Cita) => void
   onEdit: (c: Cita) => void
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<Cita | null>(null)
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  useCloseOnSubmit(() => setDeleteTarget(null))
+
   if (citas.length === 0) {
     return (
       <div className="px-4 py-10 text-center text-gray-400">No hay citas.</div>
@@ -455,16 +471,12 @@ function TablaView({
                     >
                       <Pencil size={14} />
                     </button>
-                    <Form method="post" onSubmit={e => { if (!confirm('¿Eliminar esta cita?')) e.preventDefault() }}>
-                      <input type="hidden" name="intent" value="delete" />
-                      <input type="hidden" name="id" value={c.id} />
-                      <button
-                        type="submit"
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </Form>
+                    <button
+                      onClick={() => setDeleteTarget(c)}
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -504,6 +516,17 @@ function TablaView({
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar cita"
+          itemLabel={deleteTarget.pacientes?.nombre ?? 'Sin paciente'}
+          description={`${fmtDate(deleteTarget.fecha_hora)}${deleteTarget.doctores ? ` · ${deleteTarget.doctores.nombre}` : ''}${deleteTarget.tratamientos ? ` · ${deleteTarget.tratamientos.nombre}` : ''}. Esta acción no se puede deshacer.`}
+          isSubmitting={navigation.state === 'submitting'}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => submit({ intent: 'delete', id: deleteTarget.id }, { method: 'post' })}
+        />
+      )}
     </>
   )
 }

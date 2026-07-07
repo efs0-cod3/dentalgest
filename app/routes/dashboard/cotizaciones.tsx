@@ -1,9 +1,11 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { Form, useLoaderData, useNavigation, useFetcher } from "react-router";
+import { Form, useLoaderData, useNavigation, useFetcher, useSubmit } from "react-router";
 import type { Route } from "./+types/cotizaciones";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
 import { getClinicaId } from "~/lib/clinica.server";
+import { useCloseOnSubmit } from "~/lib/hooks";
+import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 import {
   Plus,
   X,
@@ -701,17 +703,15 @@ function CotizacionDetalleModal({
   onEdit: () => void;
 }) {
   const navigation = useNavigation();
+  const submit = useSubmit();
   const [showCongelar, setShowCongelar] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const displayEstado = computeEstado(cotizacion);
   const dias = diasRestantes(cotizacion.fecha_vencimiento);
   const { Icon, label, color } = estadoConfig[displayEstado];
   const deposito = Math.round(cotizacion.monto_total * 0.1 * 100) / 100;
 
-  useEffect(() => {
-    if (navigation.state === "idle" && navigation.formData) {
-      setShowCongelar(false);
-    }
-  }, [navigation.state]);
+  useCloseOnSubmit(() => { setShowCongelar(false); setConfirmDelete(false); });
 
   function handlePrint() {
     const w = window.open("", "_blank", "width=760,height=900");
@@ -722,6 +722,7 @@ function CotizacionDetalleModal({
   }
 
   return createPortal(
+    <>
     <div
       className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -947,22 +948,28 @@ function CotizacionDetalleModal({
 
         {/* footer delete */}
         <div className="px-5 py-3 border-t border-gray-100 flex-shrink-0 flex justify-end">
-          <Form
-            method="post"
-            onSubmit={(e) => { if (!confirm("¿Eliminar esta cotización?")) e.preventDefault(); }}
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
           >
-            <input type="hidden" name="intent" value="delete" />
-            <input type="hidden" name="id" value={cotizacion.id} />
-            <button
-              type="submit"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-            >
-              <Trash2 size={13} /> Eliminar
-            </button>
-          </Form>
+            <Trash2 size={13} /> Eliminar
+          </button>
         </div>
       </div>
-    </div>,
+    </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar cotización"
+        itemLabel={cotizacion.titulo ?? (cotizacion.pacientes?.nombre ?? "Sin paciente")}
+        description={`${fmt(cotizacion.monto_total)} · vence ${fmtDate(cotizacion.fecha_vencimiento)}. Esta acción no se puede deshacer.`}
+        isSubmitting={navigation.state === "submitting"}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: "delete", id: cotizacion.id }, { method: "post" })}
+      />
+    )}
+    </>,
     document.body
   );
 }
