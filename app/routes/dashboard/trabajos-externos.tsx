@@ -1040,6 +1040,13 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
     }
   }, [trabajos])
 
+  useEffect(() => {
+    if (facturaDetalle) {
+      const updated = facturas.find(f => f.id === facturaDetalle.id)
+      setFacturaDetalle(updated ?? null)
+    }
+  }, [facturas])
+
   const trabajosFiltrados = estadoFiltro === 'todas' ? trabajos : trabajos.filter(t => t.estado === estadoFiltro)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(clienteQuery.toLowerCase()))
   const clientesConPendientes = clientes.filter(c =>
