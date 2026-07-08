@@ -232,6 +232,14 @@ export async function action({ request }: Route.ActionArgs) {
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return { ok: true }
   }
+  if (intent === 'delete_factura') {
+    const facturaId = fd.get('id') as string
+    // un-bill the jobs first so the factura_id FK doesn't block the delete,
+    // and they become eligible to be invoiced again
+    await supabase.from('trabajos_externos').update({ factura_id: null }).eq('factura_id', facturaId).eq('clinica_id', clinicaId)
+    await supabase.from('facturas_externas').delete().eq('id', facturaId).eq('clinica_id', clinicaId)
+    return { ok: true }
+  }
 
   return { ok: false, error: 'Intent desconocido' }
 }
@@ -673,10 +681,131 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
   )
 }
 
+// ─── trabajo detalle modal ──────────────────────────────────────────────────────
+
+function TrabajoDetalleModal({ trabajo, clinicaNombre, onClose, onEdit }: {
+  trabajo: TrabajoExterno; clinicaNombre: string; onClose: () => void; onEdit: () => void
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  useCloseOnSubmit(() => { setConfirmDelete(false); onClose() })
+  const { label, color, Icon } = estadoTrabajoConfig[trabajo.estado]
+
+  async function handlePrint() {
+    const w = window.open('', '_blank', 'width=600,height=800')
+    if (!w) { alert('Permite ventanas emergentes para imprimir'); return }
+    const QRCode = (await import('qrcode')).default
+    const qrUrl = `${window.location.origin}/verificar-trabajo/${trabajo.id}?token=${trabajo.verification_token}`
+    const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 120, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
+    w.document.write(buildTrabajoHtml(trabajo, qrDataUrl, clinicaNombre))
+    w.document.close()
+    w.focus()
+  }
+
+  return createPortal(
+    <>
+    <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+        <div className="flex items-start justify-between px-6 py-5 border-b border-gray-100 flex-shrink-0">
+          <div className="min-w-0">
+            <span className={cn('inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold', color)}>
+              <Icon size={11} /> {label}
+            </span>
+            <h2 className="font-semibold text-gray-900 text-lg mt-2 leading-tight">{trabajo.tipo_trabajo}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">{trabajo.clientes_externos?.nombre ?? 'Sin cliente'}</p>
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={onEdit} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+              <Pencil size={13} /> Editar
+            </button>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-6 space-y-5">
+          <div className="grid grid-cols-2 gap-3">
+            {trabajo.material && (
+              <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Material</p>
+                <p className="text-sm text-gray-900">{trabajo.material}</p></div>
+            )}
+            {trabajo.paciente_referencia && (
+              <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Referencia del paciente</p>
+                <p className="text-sm text-gray-900">{trabajo.paciente_referencia}</p></div>
+            )}
+            {trabajo.precio != null && (
+              <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Precio</p>
+                <p className="text-sm text-gray-900 font-semibold">{fmtMoney(trabajo.precio)}</p></div>
+            )}
+            <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Facturación</p>
+              <p className="text-sm text-gray-900">{trabajo.factura_id ? 'Facturado' : 'Sin facturar'}</p></div>
+            <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Fecha de recibido</p>
+              <p className="text-sm text-gray-900">{fmtDate(trabajo.fecha_recibido)}</p></div>
+            {trabajo.fecha_prometida && (
+              <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Fecha prometida</p>
+                <p className="text-sm text-gray-900">{fmtDate(trabajo.fecha_prometida)}</p></div>
+            )}
+            {trabajo.fecha_entregado && (
+              <div><p className="text-[10px] uppercase tracking-widest font-semibold text-gray-400 mb-0.5">Fecha de entrega</p>
+                <p className="text-sm text-gray-900">{fmtDate(trabajo.fecha_entregado)}</p></div>
+            )}
+          </div>
+
+          {trabajo.notas && (
+            <div className="p-3 bg-gray-50 rounded-xl border border-gray-200">
+              <p className="text-xs font-medium text-gray-500 mb-0.5">Notas</p>
+              <p className="text-sm text-gray-800 whitespace-pre-line">{trabajo.notas}</p>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Fotos ({trabajo.fotos.length})</p>
+            {trabajo.fotos.length === 0 ? (
+              <p className="text-sm text-gray-400">Sin fotos adjuntas.</p>
+            ) : (
+              <div className="grid grid-cols-4 gap-2">
+                {trabajo.fotos.map(url => (
+                  <a key={url} href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+          <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+            <Printer size={13} /> Imprimir ficha
+          </button>
+          <button onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+            <Trash2 size={13} /> Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar trabajo"
+        itemLabel={trabajo.tipo_trabajo}
+        description={`${trabajo.clientes_externos?.nombre ?? 'Sin cliente'}. Esta acción no se puede deshacer.`}
+        isSubmitting={navigation.state === 'submitting'}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: 'delete_trabajo', id: trabajo.id }, { method: 'post' })}
+      />
+    )}
+    </>,
+    document.body
+  )
+}
+
 // ─── trabajo card ───────────────────────────────────────────────────────────────
 
-function TrabajoCard({ trabajo, clinicaNombre, onEdit }: {
-  trabajo: TrabajoExterno; clinicaNombre: string; onEdit: () => void
+function TrabajoCard({ trabajo, clinicaNombre, onView, onEdit }: {
+  trabajo: TrabajoExterno; clinicaNombre: string; onView: () => void; onEdit: () => void
 }) {
   const cambiarEstadoFetcher = useFetcher()
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -701,7 +830,8 @@ function TrabajoCard({ trabajo, clinicaNombre, onEdit }: {
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-3 transition-shadow hover:shadow-md">
+    <div onClick={onView}
+      className="bg-white rounded-2xl border border-gray-100 p-4 flex flex-col gap-3 transition-shadow hover:shadow-md cursor-pointer">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold mb-1.5', color)}>
@@ -711,7 +841,7 @@ function TrabajoCard({ trabajo, clinicaNombre, onEdit }: {
           <p className="text-xs text-gray-500 mt-0.5">{trabajo.clientes_externos?.nombre ?? '—'}</p>
           {trabajo.paciente_referencia && <p className="text-xs text-gray-400">{trabajo.paciente_referencia}</p>}
         </div>
-        <div className="flex items-center gap-0.5 flex-shrink-0">
+        <div className="flex items-center gap-0.5 flex-shrink-0" onClick={e => e.stopPropagation()}>
           <button type="button" onClick={handlePrint} title="Imprimir ficha"
             className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"><Printer size={13} /></button>
           <button type="button" onClick={onEdit}
@@ -730,7 +860,7 @@ function TrabajoCard({ trabajo, clinicaNombre, onEdit }: {
       </div>
 
       {trabajo.estado !== 'entregado' && (
-        <div className="flex gap-2 pt-1 border-t border-gray-50">
+        <div className="flex gap-2 pt-1 border-t border-gray-50" onClick={e => e.stopPropagation()}>
           {trabajo.estado === 'recibido' && (
             <button type="button" onClick={() => cambiarEstado('en_proceso')} disabled={cambiarEstadoFetcher.state !== 'idle'}
               className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors disabled:opacity-50">
@@ -778,6 +908,10 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
   factura: FacturaExterna; trabajos: TrabajoExterno[]; clinicaNombre: string; onClose: () => void
 }) {
   const fetcher = useFetcher()
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  useCloseOnSubmit(() => { setConfirmDelete(false); onClose() })
   const trabajosFactura = trabajos.filter(t => t.factura_id === factura.id)
   const { label, color } = estadoFacturaConfig[factura.estado]
 
@@ -797,6 +931,7 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
   }
 
   return createPortal(
+    <>
     <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
@@ -835,9 +970,25 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
               <CheckCircle size={13} /> Marcar pagada
             </button>
           )}
+          <button onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+            <Trash2 size={13} /> Eliminar
+          </button>
         </div>
       </div>
-    </div>,
+    </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar factura"
+        itemLabel={factura.clientes_externos?.nombre ?? '—'}
+        description={`${fmtMoney(factura.total)} · ${trabajosFactura.length} trabajo(s). Los trabajos incluidos volverán a quedar disponibles para facturar. Esta acción no se puede deshacer.`}
+        isSubmitting={navigation.state === 'submitting'}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: 'delete_factura', id: factura.id }, { method: 'post' })}
+      />
+    )}
+    </>,
     document.body
   )
 }
@@ -858,6 +1009,7 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
   const [clienteModal, setClienteModal] = useState<{ open: boolean; cliente: ClienteExterno | null }>({ open: false, cliente: null })
   const [clienteDetalle, setClienteDetalle] = useState<ClienteExterno | null>(null)
   const [facturaDetalle, setFacturaDetalle] = useState<FacturaExterna | null>(null)
+  const [trabajoDetalle, setTrabajoDetalle] = useState<TrabajoExterno | null>(null)
   const [nuevaFacturaClienteId, setNuevaFacturaClienteId] = useState('')
   const [generarFacturaCliente, setGenerarFacturaCliente] = useState<ClienteExterno | null>(null)
 
@@ -872,6 +1024,13 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
     if (trabajoModal.open && trabajoModal.trabajo) {
       const updated = trabajos.find(t => t.id === trabajoModal.trabajo!.id)
       if (updated) setTrabajoModal(m => ({ ...m, trabajo: updated }))
+    }
+  }, [trabajos])
+
+  useEffect(() => {
+    if (trabajoDetalle) {
+      const updated = trabajos.find(t => t.id === trabajoDetalle.id)
+      setTrabajoDetalle(updated ?? null)
     }
   }, [trabajos])
 
@@ -934,6 +1093,7 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {trabajosFiltrados.map(t => (
                 <TrabajoCard key={t.id} trabajo={t} clinicaNombre={clinicaNombre}
+                  onView={() => setTrabajoDetalle(t)}
                   onEdit={() => setTrabajoModal({ open: true, trabajo: t })} />
               ))}
             </div>
@@ -1042,6 +1202,11 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
       {generarFacturaCliente && (
         <GenerarFacturaModal cliente={generarFacturaCliente} trabajos={trabajos}
           onClose={() => setGenerarFacturaCliente(null)} />
+      )}
+      {trabajoDetalle && (
+        <TrabajoDetalleModal trabajo={trabajoDetalle} clinicaNombre={clinicaNombre}
+          onClose={() => setTrabajoDetalle(null)}
+          onEdit={() => { setTrabajoModal({ open: true, trabajo: trabajoDetalle }); setTrabajoDetalle(null) }} />
       )}
     </div>
   )

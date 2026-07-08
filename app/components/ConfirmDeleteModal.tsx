@@ -14,7 +14,7 @@ export function ConfirmDeleteModal({
   title, itemLabel, description, confirmLabel = 'Eliminar', isSubmitting, onConfirm, onCancel,
 }: ConfirmDeleteModalProps) {
   return (
-    <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onCancel}>
+    <div className="fixed inset-0 z-[10000] flex items-end sm:items-center justify-center bg-black/40 p-4" onClick={onCancel}>
       <div className="w-full sm:max-w-sm bg-white rounded-2xl shadow-xl overflow-hidden" onClick={e => e.stopPropagation()}>
         <div className="p-6">
           <div className="w-11 h-11 rounded-full bg-red-50 text-red-600 flex items-center justify-center mb-4">
