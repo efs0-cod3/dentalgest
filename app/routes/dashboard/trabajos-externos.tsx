@@ -944,6 +944,7 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
   // to the page-level navigation state and would close the parent modal too
   const fetcher = useFetcher<typeof action>()
   const isSubmitting = fetcher.state !== 'idle'
+  const [modo, setModo] = useState<'completo' | 'parcial'>('completo')
   useEffect(() => { if (fetcher.state === 'idle' && fetcher.data?.ok) onClose() }, [fetcher.state, fetcher.data])
 
   return (
@@ -965,6 +966,21 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
           </div>
         </div>
 
+        <div className="px-6 pb-4">
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            <button type="button" onClick={() => setModo('completo')}
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                modo === 'completo' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              Pago completo
+            </button>
+            <button type="button" onClick={() => setModo('parcial')}
+              className={cn('flex-1 px-3 py-1.5 text-xs font-medium rounded-md transition-colors',
+                modo === 'parcial' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}>
+              Abono parcial
+            </button>
+          </div>
+        </div>
+
         <fetcher.Form method="post" className="px-6 pb-6 space-y-4">
           <input type="hidden" name="intent" value="abono_factura_externa" />
           <input type="hidden" name="factura_id" value={factura.id} />
@@ -974,9 +990,18 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Monto</label>
-              <input type="number" name="monto" required min={0.01} step={0.01}
-                defaultValue={factura.saldo > 0 ? factura.saldo : ''}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              {modo === 'completo' ? (
+                <>
+                  <input type="hidden" name="monto" value={factura.saldo} />
+                  <div className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-gray-50">
+                    {fmtMoney(factura.saldo)}
+                  </div>
+                </>
+              ) : (
+                <input type="number" name="monto" required min={0.01} max={factura.saldo} step={0.01}
+                  defaultValue={factura.saldo > 0 ? factura.saldo : ''}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Método de pago</label>
@@ -1006,8 +1031,9 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
           <div className="flex justify-end gap-2 pt-1">
             <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
             <button type="submit" disabled={isSubmitting}
-              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-              {isSubmitting ? 'Guardando…' : 'Registrar abono'}
+              className={cn('px-4 py-2 text-sm font-medium text-white rounded-lg disabled:opacity-50 transition-colors',
+                modo === 'completo' ? 'bg-green-600 hover:bg-green-700' : 'bg-blue-600 hover:bg-blue-700')}>
+              {isSubmitting ? 'Guardando…' : modo === 'completo' ? 'Confirmar pago completo' : 'Registrar abono'}
             </button>
           </div>
         </fetcher.Form>
@@ -1311,8 +1337,15 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
                   <p className="text-xs text-gray-400">{fmtDate(f.periodo_inicio)} – {fmtDate(f.periodo_fin)}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
-                  <p className="text-sm font-bold text-gray-900">{fmtMoney(f.total)}</p>
-                  <span className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium', color)}>{label}</span>
+                  {f.estado === 'pagada' ? (
+                    <p className="text-sm font-bold text-gray-900">{fmtMoney(f.total)}</p>
+                  ) : (
+                    <>
+                      <p className="text-sm font-bold text-red-600">{fmtMoney(f.saldo)}</p>
+                      <p className="text-xs text-gray-400">de {fmtMoney(f.total)}</p>
+                    </>
+                  )}
+                  <span className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium mt-0.5', color)}>{label}</span>
                 </div>
               </div>
             )
