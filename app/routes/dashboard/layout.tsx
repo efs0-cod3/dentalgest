@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { redirect, Outlet, NavLink, Form } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Settings, Menu, X } from 'lucide-react'
+import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X } from 'lucide-react'
 import { cn } from '~/lib/utils'
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -25,6 +25,7 @@ const nav = [
   { to: '/dashboard/caja', label: 'Caja', icon: DollarSign, end: false },
   { to: '/dashboard/cotizaciones', label: 'Cotizaciones', icon: FileText, end: false },
   { to: '/dashboard/laboratorio', label: 'Laboratorio', icon: FlaskConical, end: false },
+  { to: '/dashboard/trabajos-externos', label: 'Trabajos externos', icon: Building2, end: false },
   { to: '/dashboard/configuracion', label: 'Configuración', icon: Settings, end: false },
 ]
 
