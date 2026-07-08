@@ -94,7 +94,6 @@ export function buildTrabajoHtml(trabajo: TrabajoParaImprimir, qrDataUrl: string
       ${row('Material', trabajo.material)}
       ${row('Fecha de recibido', fmtDate(trabajo.fecha_recibido))}
       ${row('Fecha prometida', trabajo.fecha_prometida ? fmtDate(trabajo.fecha_prometida) : null, true)}
-      ${row('Precio', trabajo.precio != null ? fmtMoney(trabajo.precio) : null)}
     </table>
   </div>
 
