@@ -31,14 +31,16 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   try {
     const supabase = createSupabaseAdminClient();
-    const { data: factura } = await supabase
+    const { data: factura, error } = await supabase
       .from("facturas_externas")
       .select("id,periodo_inicio,periodo_fin,estado,fecha_emision,clientes_externos(nombre)")
       .eq("id", id)
       .eq("verification_token", token)
       .single();
+    if (error) console.error("[verificar-factura] query error:", error.message, "id:", id);
     return { factura: factura as unknown as FacturaPublica | null };
-  } catch {
+  } catch (e) {
+    console.error("[verificar-factura] unexpected error:", e instanceof Error ? e.message : e);
     return { factura: null };
   }
 }
