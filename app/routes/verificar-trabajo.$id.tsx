@@ -32,14 +32,16 @@ export async function loader({ params, request }: Route.LoaderArgs) {
 
   try {
     const supabase = createSupabaseAdminClient();
-    const { data: trabajo } = await supabase
+    const { data: trabajo, error } = await supabase
       .from("trabajos_externos")
       .select("id,tipo_trabajo,estado,fecha_recibido,fecha_prometida,fecha_entregado,clientes_externos(nombre)")
       .eq("id", id)
       .eq("verification_token", token)
       .single();
+    if (error) console.error("[verificar-trabajo] query error:", error.message, "id:", id);
     return { trabajo: trabajo as unknown as TrabajoPublico | null };
-  } catch {
+  } catch (e) {
+    console.error("[verificar-trabajo] unexpected error:", e instanceof Error ? e.message : e);
     return { trabajo: null };
   }
 }
