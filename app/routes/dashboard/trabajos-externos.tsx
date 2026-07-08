@@ -172,29 +172,32 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'upload_foto_trabajo') {
     const archivo = fd.get('archivo') as File
     const trabajoId = fd.get('trabajo_id') as string
-    if (archivo && archivo.size > 0) {
-      const ext = archivo.name.split('.').pop()
-      const path = `${clinicaId}/${trabajoId}/${Date.now()}.${ext}`
-      const bytes = await archivo.arrayBuffer()
-      const { error } = await supabase.storage.from(FOTOS_BUCKET).upload(path, bytes, { contentType: archivo.type })
-      if (!error) {
-        const { data: { publicUrl } } = supabase.storage.from(FOTOS_BUCKET).getPublicUrl(path)
-        const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
-        const fotos = [...((trabajo?.fotos as string[] | null) ?? []), publicUrl]
-        await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
-      }
-    }
-    return { ok: true }
+    if (!archivo || archivo.size === 0) return { ok: false, error: 'Selecciona un archivo primero.', intent }
+    const ext = archivo.name.split('.').pop()
+    const path = `${clinicaId}/${trabajoId}/${Date.now()}.${ext}`
+    const bytes = await archivo.arrayBuffer()
+    const { error: uploadError } = await supabase.storage.from(FOTOS_BUCKET).upload(path, bytes, { contentType: archivo.type })
+    if (uploadError) return { ok: false, error: `Error al subir la foto: ${uploadError.message}`, intent }
+    const { data: { publicUrl } } = supabase.storage.from(FOTOS_BUCKET).getPublicUrl(path)
+    const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
+    const fotos = [...((trabajo?.fotos as string[] | null) ?? []), publicUrl]
+    const { error: updateError } = await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
+    if (updateError) return { ok: false, error: `Foto subida pero no se pudo guardar: ${updateError.message}`, intent }
+    return { ok: true, intent }
   }
   if (intent === 'delete_foto_trabajo') {
     const trabajoId = fd.get('trabajo_id') as string
     const url = fd.get('url') as string
     const path = photoStoragePath(url)
-    if (path) await supabase.storage.from(FOTOS_BUCKET).remove([path])
+    if (path) {
+      const { error: removeError } = await supabase.storage.from(FOTOS_BUCKET).remove([path])
+      if (removeError) return { ok: false, error: removeError.message, intent }
+    }
     const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
     const fotos = ((trabajo?.fotos as string[] | null) ?? []).filter(f => f !== url)
-    await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
-    return { ok: true }
+    const { error: updateError } = await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
+    if (updateError) return { ok: false, error: updateError.message, intent }
+    return { ok: true, intent }
   }
 
   // ── facturas ──
@@ -525,7 +528,7 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
   trabajo: TrabajoExterno | null; clientes: ClienteExterno[]; onClose: () => void
 }) {
   const fetcher = useFetcher<typeof action>()
-  const fotoFetcher = useFetcher()
+  const fotoFetcher = useFetcher<typeof action>()
   const isSubmitting = fetcher.state !== 'idle'
   useEffect(() => { if (fetcher.state === 'idle' && fetcher.data?.ok) onClose() }, [fetcher.state, fetcher.data])
 
@@ -631,11 +634,16 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
                 <Upload size={12} /> {fotoFetcher.state !== 'idle' ? 'Subiendo…' : 'Subir'}
               </button>
             </fotoFetcher.Form>
+            {fotoFetcher.data && !fotoFetcher.data.ok && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{fotoFetcher.data.error}</p>
+            )}
             {trabajo.fotos.length > 0 && (
               <div className="grid grid-cols-4 gap-2">
                 {trabajo.fotos.map(url => (
                   <div key={url} className="relative group">
-                    <img src={url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200" />
+                    <a href={url} target="_blank" rel="noreferrer">
+                      <img src={url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                    </a>
                     <fotoFetcher.Form method="post" className="absolute -top-1.5 -right-1.5">
                       <input type="hidden" name="intent" value="delete_foto_trabajo" />
                       <input type="hidden" name="trabajo_id" value={trabajo.id} />
@@ -850,6 +858,8 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
   const [clienteModal, setClienteModal] = useState<{ open: boolean; cliente: ClienteExterno | null }>({ open: false, cliente: null })
   const [clienteDetalle, setClienteDetalle] = useState<ClienteExterno | null>(null)
   const [facturaDetalle, setFacturaDetalle] = useState<FacturaExterna | null>(null)
+  const [nuevaFacturaClienteId, setNuevaFacturaClienteId] = useState('')
+  const [generarFacturaCliente, setGenerarFacturaCliente] = useState<ClienteExterno | null>(null)
 
   useEffect(() => {
     if (clienteDetalle) {
@@ -867,6 +877,9 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
 
   const trabajosFiltrados = estadoFiltro === 'todas' ? trabajos : trabajos.filter(t => t.estado === estadoFiltro)
   const clientesFiltrados = clientes.filter(c => c.nombre.toLowerCase().includes(clienteQuery.toLowerCase()))
+  const clientesConPendientes = clientes.filter(c =>
+    trabajos.some(t => t.cliente_externo_id === c.id && t.estado === 'entregado' && !t.factura_id)
+  )
 
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: 'trabajos', label: `Trabajos (${trabajos.length})`, icon: Wrench },
@@ -963,7 +976,31 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
       )}
 
       {tab === 'facturas' && (
-        <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
+        <div>
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            <select value={nuevaFacturaClienteId} onChange={e => setNuevaFacturaClienteId(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">
+                {clientesConPendientes.length === 0 ? 'Sin trabajos entregados pendientes de facturar' : 'Elegir cliente para facturar…'}
+              </option>
+              {clientesConPendientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+            <button
+              disabled={!nuevaFacturaClienteId}
+              onClick={() => {
+                const cliente = clientes.find(c => c.id === nuevaFacturaClienteId)
+                if (cliente) { setGenerarFacturaCliente(cliente); setNuevaFacturaClienteId('') }
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+              <Receipt size={14} /> Generar factura
+            </button>
+          </div>
+          {clientesConPendientes.length === 0 && facturas.length === 0 && (
+            <p className="text-xs text-gray-400 mb-3">
+              Una factura solo se puede generar para clientes con al menos un trabajo en estado "Entregado" que aún no esté facturado.
+            </p>
+          )}
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden divide-y divide-gray-100">
           {facturas.length === 0 ? (
             <div className="px-4 py-12 text-center text-gray-400">Sin facturas generadas.</div>
           ) : facturas.map(f => {
@@ -982,6 +1019,7 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
               </div>
             )
           })}
+          </div>
         </div>
       )}
 
@@ -1000,6 +1038,10 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
       {facturaDetalle && (
         <FacturaDetalleModal factura={facturaDetalle} trabajos={trabajos} clinicaNombre={clinicaNombre}
           onClose={() => setFacturaDetalle(null)} />
+      )}
+      {generarFacturaCliente && (
+        <GenerarFacturaModal cliente={generarFacturaCliente} trabajos={trabajos}
+          onClose={() => setGenerarFacturaCliente(null)} />
       )}
     </div>
   )
