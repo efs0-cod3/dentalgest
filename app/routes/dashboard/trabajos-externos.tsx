@@ -8,7 +8,7 @@ import { useCloseOnSubmit } from '~/lib/hooks'
 import {
   Plus, X, Pencil, Trash2, Building2, Search, Phone, Mail,
   Inbox, Clock, CheckCircle, Package, Calendar, Printer, Upload,
-  DollarSign, Receipt, Wrench,
+  DollarSign, Receipt, Wrench, Download,
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -18,7 +18,8 @@ import { buildTrabajoHtml, buildFacturaExternaHtml } from '~/lib/trabajoExterno'
 
 type TipoCliente = 'clinica' | 'doctor_independiente'
 type EstadoTrabajo = 'recibido' | 'en_proceso' | 'terminado' | 'entregado'
-type EstadoFactura = 'pendiente' | 'pagada'
+type EstadoFactura = 'pendiente' | 'parcial' | 'pagada'
+const METODOS_PAGO = ['efectivo', 'tarjeta', 'transferencia'] as const
 
 export type ClienteExterno = {
   id: string; nombre: string; tipo: TipoCliente
@@ -40,8 +41,10 @@ export type FacturaExterna = {
   id: string; cliente_externo_id: string
   periodo_inicio: string; periodo_fin: string; total: number
   estado: EstadoFactura; fecha_emision: string; fecha_pago: string | null
+  fecha_vencimiento: string | null
   verification_token: string
   clientes_externos: { nombre: string } | null
+  monto_pagado: number; saldo: number; porcentaje: number
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
@@ -61,6 +64,7 @@ const estadoTrabajoConfig: Record<EstadoTrabajo, { label: string; color: string;
 }
 const estadoFacturaConfig: Record<EstadoFactura, { label: string; color: string }> = {
   pendiente: { label: 'Pendiente', color: 'bg-amber-100 text-amber-700' },
+  parcial:   { label: 'Parcial',   color: 'bg-blue-100 text-blue-700' },
   pagada:    { label: 'Pagada',    color: 'bg-green-100 text-green-700' },
 }
 const TIPOS_TRABAJO = [
@@ -94,14 +98,21 @@ export async function loader({ request }: Route.LoaderArgs) {
       'id,cliente_externo_id,paciente_referencia,tipo_trabajo,material,notas,fotos,estado,fecha_recibido,fecha_prometida,fecha_entregado,precio,factura_id,verification_token,created_at,clientes_externos(nombre)'
     ).eq('clinica_id', clinicaId).order('created_at', { ascending: false }),
     supabase.from('facturas_externas').select(
-      'id,cliente_externo_id,periodo_inicio,periodo_fin,total,estado,fecha_emision,fecha_pago,verification_token,clientes_externos(nombre)'
+      'id,cliente_externo_id,periodo_inicio,periodo_fin,total,estado,fecha_emision,fecha_pago,fecha_vencimiento,verification_token,clientes_externos(nombre),pagos_externos(monto)'
     ).eq('clinica_id', clinicaId).order('fecha_emision', { ascending: false }),
   ])
+  const facturasConSaldo: FacturaExterna[] = (facturas ?? []).map((f: any) => {
+    const monto_pagado = (f.pagos_externos ?? []).reduce((s: number, p: any) => s + Number(p.monto), 0)
+    const saldo = Math.max(0, Number(f.total) - monto_pagado)
+    const porcentaje = f.total > 0 ? Math.min(100, (monto_pagado / f.total) * 100) : 0
+    const { pagos_externos, ...rest } = f
+    return { ...rest, monto_pagado, saldo, porcentaje }
+  })
   return {
     clinicaNombre: perfilClinica?.nombre ?? 'Nin Dental Clinic',
     clientes: (clientes ?? []) as ClienteExterno[],
     trabajos: (trabajos ?? []) as unknown as TrabajoExterno[],
-    facturas: (facturas ?? []) as unknown as FacturaExterna[],
+    facturas: facturasConSaldo,
   }
 }
 
@@ -224,19 +235,36 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: false, error: 'No hay trabajos entregados sin facturar en ese período.', intent }
     }
     const total = elegibles.reduce((s, t) => s + (Number(t.precio) || 0), 0)
+    const fechaVencimiento = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
     const { data: factura, error } = await supabase.from('facturas_externas').insert({
       clinica_id: clinicaId, cliente_externo_id: clienteId,
       periodo_inicio: periodoInicio, periodo_fin: periodoFin, total,
+      fecha_vencimiento: fechaVencimiento,
     }).select().single()
     if (error || !factura) return { ok: false, error: error?.message ?? 'Error al crear la factura', intent }
     await supabase.from('trabajos_externos').update({ factura_id: factura.id }).in('id', elegibles.map(t => t.id))
     return { ok: true, intent }
   }
-  if (intent === 'marcar_pagada_factura') {
-    await supabase.from('facturas_externas')
-      .update({ estado: 'pagada', fecha_pago: new Date().toISOString().slice(0, 10) })
-      .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
-    return { ok: true }
+  if (intent === 'abono_factura_externa') {
+    const facturaId = fd.get('factura_id') as string
+    const monto = Number(fd.get('monto'))
+    const { error: insertError } = await supabase.from('pagos_externos').insert({
+      clinica_id: clinicaId,
+      factura_id: facturaId,
+      monto,
+      metodo_pago: fd.get('metodo_pago') as string,
+      fecha: (fd.get('fecha') as string) || new Date().toISOString().slice(0, 10),
+      notas: (fd.get('notas') as string) || null,
+    })
+    if (insertError) return { ok: false, error: insertError.message, intent }
+    const total = Number(fd.get('total'))
+    const montoPagadoPrevio = Number(fd.get('monto_pagado'))
+    const montoPagado = montoPagadoPrevio + monto
+    const nuevoEstado = montoPagado >= total ? 'pagada' : 'parcial'
+    const updates: Record<string, string> = { estado: nuevoEstado }
+    if (nuevoEstado === 'pagada') updates.fecha_pago = new Date().toISOString().slice(0, 10)
+    await supabase.from('facturas_externas').update(updates).eq('id', facturaId).eq('clinica_id', clinicaId)
+    return { ok: true, intent }
   }
   if (intent === 'delete_factura') {
     const facturaId = fd.get('id') as string
@@ -908,13 +936,93 @@ function TrabajoCard({ trabajo, clinicaNombre, onView, onEdit }: {
   )
 }
 
+// ─── abonar factura modal ───────────────────────────────────────────────────────
+
+function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onClose: () => void }) {
+  // uses a fetcher (not a top-level Form submit) so this nested modal's submit
+  // doesn't also trigger FacturaDetalleModal's useCloseOnSubmit, which is tied
+  // to the page-level navigation state and would close the parent modal too
+  const fetcher = useFetcher<typeof action>()
+  const isSubmitting = fetcher.state !== 'idle'
+  useEffect(() => { if (fetcher.state === 'idle' && fetcher.data?.ok) onClose() }, [fetcher.state, fetcher.data])
+
+  return (
+    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/40 p-4"
+      onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Abonar factura</h2>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="px-6 pt-4">
+          <div className="flex justify-between text-xs text-gray-400 mb-1">
+            <span>Pagado: {fmtMoney(factura.monto_pagado)}</span>
+            <span>Total: {fmtMoney(factura.total)}</span>
+          </div>
+          <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
+            <div className="h-2 rounded-full bg-blue-500" style={{ width: `${factura.porcentaje}%` }} />
+          </div>
+        </div>
+
+        <fetcher.Form method="post" className="px-6 pb-6 space-y-4">
+          <input type="hidden" name="intent" value="abono_factura_externa" />
+          <input type="hidden" name="factura_id" value={factura.id} />
+          <input type="hidden" name="total" value={factura.total} />
+          <input type="hidden" name="monto_pagado" value={factura.monto_pagado} />
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Monto</label>
+              <input type="number" name="monto" required min={0.01} step={0.01}
+                defaultValue={factura.saldo > 0 ? factura.saldo : ''}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Método de pago</label>
+              <select name="metodo_pago"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                {METODOS_PAGO.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Fecha</label>
+            <input type="date" name="fecha" defaultValue={new Date().toISOString().slice(0, 10)}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notas</label>
+            <textarea name="notas" rows={2}
+              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+          </div>
+
+          {fetcher.data && !fetcher.data.ok && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{fetcher.data.error}</p>
+          )}
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition-colors">Cancelar</button>
+            <button type="submit" disabled={isSubmitting}
+              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+              {isSubmitting ? 'Guardando…' : 'Registrar abono'}
+            </button>
+          </div>
+        </fetcher.Form>
+      </div>
+    </div>
+  )
+}
+
 // ─── factura detalle modal ──────────────────────────────────────────────────────
 
 function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
   factura: FacturaExterna; trabajos: TrabajoExterno[]; clinicaNombre: string; onClose: () => void
 }) {
-  const fetcher = useFetcher()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [abonoModal, setAbonoModal] = useState(false)
   const navigation = useNavigation()
   const submit = useSubmit()
   useCloseOnSubmit(() => { setConfirmDelete(false); onClose() })
@@ -930,10 +1038,6 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
     w.document.write(buildFacturaExternaHtml(factura, trabajosFactura, qrDataUrl, clinicaNombre))
     w.document.close()
     w.focus()
-  }
-
-  function marcarPagada() {
-    fetcher.submit({ intent: 'marcar_pagada_factura', id: factura.id }, { method: 'post' })
   }
 
   return createPortal(
@@ -953,6 +1057,20 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
         <div className="overflow-y-auto flex-1 p-6 space-y-4">
           <p className="text-3xl font-extrabold text-gray-900">{fmtMoney(factura.total)}</p>
 
+          {factura.estado !== 'pendiente' && (
+            <div>
+              <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
+                <span>Pagado: {fmtMoney(factura.monto_pagado)}</span>
+                <span>{Math.round(factura.porcentaje)}%</span>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-1.5">
+                <div className={cn('h-1.5 rounded-full transition-all', factura.porcentaje >= 100 ? 'bg-green-500' : 'bg-blue-500')}
+                  style={{ width: `${factura.porcentaje}%` }} />
+              </div>
+              {factura.saldo > 0 && <p className="text-xs text-gray-400 mt-1">Saldo: {fmtMoney(factura.saldo)}</p>}
+            </div>
+          )}
+
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Trabajos incluidos ({trabajosFactura.length})</p>
             <div className="space-y-1.5">
@@ -970,10 +1088,10 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
           <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <Printer size={13} /> Imprimir
           </button>
-          {factura.estado === 'pendiente' && (
-            <button onClick={marcarPagada} disabled={fetcher.state !== 'idle'}
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
-              <CheckCircle size={13} /> Marcar pagada
+          {factura.estado !== 'pagada' && (
+            <button onClick={() => setAbonoModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
+              <CheckCircle size={13} /> Abonar
             </button>
           )}
           <button onClick={() => setConfirmDelete(true)}
@@ -993,6 +1111,9 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => submit({ intent: 'delete_factura', id: factura.id }, { method: 'post' })}
       />
+    )}
+    {abonoModal && (
+      <AbonoFacturaModal factura={factura} onClose={() => setAbonoModal(false)} />
     )}
     </>,
     document.body
@@ -1167,6 +1288,10 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
               className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
               <Receipt size={14} /> Generar factura
             </button>
+            <a href="/api/export-aging-externo"
+              className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors ml-auto">
+              <Download size={14} /> Exportar CSV
+            </a>
           </div>
           {clientesConPendientes.length === 0 && facturas.length === 0 && (
             <p className="text-xs text-gray-400 mb-3">

@@ -6,6 +6,7 @@ export default [
   route('logout', 'routes/logout.tsx'),
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
   route('api/export-datos', 'routes/api.export-datos.ts'),
+  route('api/export-aging-externo', 'routes/api.export-aging-externo.ts'),
   route('verificar/:id', 'routes/verificar.$id.tsx'),
   route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
   route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),
