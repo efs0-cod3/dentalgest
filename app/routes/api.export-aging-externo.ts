@@ -1,10 +1,6 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
-
-function csvEscape(v: string | number): string {
-  const s = String(v)
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
-}
+import { csvEscape } from '~/lib/csv'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
