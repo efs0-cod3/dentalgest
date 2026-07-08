@@ -128,9 +128,12 @@ export async function action({ request }: Route.ActionArgs) {
       rnc: (fd.get('rnc') as string) || null,
       notas: (fd.get('notas') as string) || null,
     }
-    const { error } = intent === 'create_cliente'
-      ? await supabase.from('clientes_externos').insert(data)
-      : await supabase.from('clientes_externos').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (intent === 'create_cliente') {
+      const { data: cliente, error } = await supabase.from('clientes_externos').insert(data).select().single()
+      if (error) return { ok: false, error: error.message, intent }
+      return { ok: true, intent, cliente: cliente as ClienteExterno }
+    }
+    const { error } = await supabase.from('clientes_externos').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message, intent }
     return { ok: true, intent }
   }
@@ -231,10 +234,16 @@ export async function action({ request }: Route.ActionArgs) {
 
 // ─── cliente form modal ────────────────────────────────────────────────────────
 
-function ClienteFormModal({ cliente, onClose }: { cliente: ClienteExterno | null; onClose: () => void }) {
+function ClienteFormModal({ cliente, onClose, onCreated }: {
+  cliente: ClienteExterno | null; onClose: () => void; onCreated?: (cliente: ClienteExterno) => void
+}) {
   const fetcher = useFetcher<typeof action>()
   const isSubmitting = fetcher.state !== 'idle'
-  useEffect(() => { if (fetcher.state === 'idle' && fetcher.data?.ok) onClose() }, [fetcher.state, fetcher.data])
+  useEffect(() => {
+    if (fetcher.state !== 'idle' || !fetcher.data?.ok) return
+    if (onCreated && 'cliente' in fetcher.data && fetcher.data.cliente) onCreated(fetcher.data.cliente)
+    onClose()
+  }, [fetcher.state, fetcher.data])
 
   return createPortal(
     <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
@@ -519,7 +528,13 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
   const isSubmitting = fetcher.state !== 'idle'
   useEffect(() => { if (fetcher.state === 'idle' && fetcher.data?.ok) onClose() }, [fetcher.state, fetcher.data])
 
+  const [clienteId, setClienteId] = useState(trabajo?.cliente_externo_id ?? '')
+  const [extraClientes, setExtraClientes] = useState<ClienteExterno[]>([])
+  const [showClienteModal, setShowClienteModal] = useState(false)
+  const clientesDisponibles = [...clientes, ...extraClientes.filter(e => !clientes.some(c => c.id === e.id))]
+
   return createPortal(
+    <>
     <div className="fixed inset-0 z-[9999] flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4"
       onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="w-full sm:max-w-xl bg-white rounded-t-2xl sm:rounded-2xl shadow-xl flex flex-col max-h-[95vh] sm:max-h-[92vh]">
@@ -532,11 +547,17 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
           {trabajo && <input type="hidden" name="id" value={trabajo.id} />}
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Cliente externo <span className="text-red-500">*</span></label>
-            <select name="cliente_externo_id" required defaultValue={trabajo?.cliente_externo_id ?? ''}
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium text-gray-600">Cliente externo <span className="text-red-500">*</span></label>
+              <button type="button" onClick={() => setShowClienteModal(true)}
+                className="flex items-center gap-1 text-xs font-medium text-blue-600 hover:text-blue-700">
+                <Plus size={12} /> Nuevo cliente
+              </button>
+            </div>
+            <select name="cliente_externo_id" required value={clienteId} onChange={e => setClienteId(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">— Seleccionar —</option>
-              {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+              {clientesDisponibles.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
             </select>
           </div>
 
@@ -629,7 +650,16 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
           </div>
         )}
       </div>
-    </div>,
+    </div>
+
+    {showClienteModal && (
+      <ClienteFormModal
+        cliente={null}
+        onClose={() => setShowClienteModal(false)}
+        onCreated={c => { setExtraClientes(prev => [...prev, c]); setClienteId(c.id) }}
+      />
+    )}
+    </>,
     document.body
   )
 }
