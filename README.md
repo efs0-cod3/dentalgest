@@ -70,7 +70,7 @@ clientes_externos, trabajos_externos, facturas_externas
 ```
 
 El módulo "Trabajos externos" además requiere un bucket público de Storage llamado
-`trabajos-externos` (Dashboard → Storage → New bucket).
+`externos` (Dashboard → Storage → New bucket).
 
 ### 4. Servidor de desarrollo
 

@@ -67,9 +67,10 @@ const TIPOS_TRABAJO = [
   'Corona', 'Puente', 'Prótesis total', 'Prótesis parcial removible',
   'Retenedor / Guarda', 'Carilla / Faceta', 'Implante (componente)', 'Otro',
 ]
+const FOTOS_BUCKET = 'externos'
 
 function photoStoragePath(url: string) {
-  const marker = '/public/trabajos-externos/'
+  const marker = `/public/${FOTOS_BUCKET}/`
   const i = url.indexOf(marker)
   return i === -1 ? null : url.slice(i + marker.length)
 }
@@ -175,9 +176,9 @@ export async function action({ request }: Route.ActionArgs) {
       const ext = archivo.name.split('.').pop()
       const path = `${clinicaId}/${trabajoId}/${Date.now()}.${ext}`
       const bytes = await archivo.arrayBuffer()
-      const { error } = await supabase.storage.from('trabajos-externos').upload(path, bytes, { contentType: archivo.type })
+      const { error } = await supabase.storage.from(FOTOS_BUCKET).upload(path, bytes, { contentType: archivo.type })
       if (!error) {
-        const { data: { publicUrl } } = supabase.storage.from('trabajos-externos').getPublicUrl(path)
+        const { data: { publicUrl } } = supabase.storage.from(FOTOS_BUCKET).getPublicUrl(path)
         const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
         const fotos = [...((trabajo?.fotos as string[] | null) ?? []), publicUrl]
         await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
@@ -189,7 +190,7 @@ export async function action({ request }: Route.ActionArgs) {
     const trabajoId = fd.get('trabajo_id') as string
     const url = fd.get('url') as string
     const path = photoStoragePath(url)
-    if (path) await supabase.storage.from('trabajos-externos').remove([path])
+    if (path) await supabase.storage.from(FOTOS_BUCKET).remove([path])
     const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
     const fotos = ((trabajo?.fotos as string[] | null) ?? []).filter(f => f !== url)
     await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
