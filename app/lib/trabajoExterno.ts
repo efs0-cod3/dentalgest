@@ -19,8 +19,9 @@ type FacturaParaImprimir = {
   periodo_inicio: string
   periodo_fin: string
   total: number
-  estado: 'pendiente' | 'pagada'
+  estado: 'pendiente' | 'parcial' | 'pagada'
   fecha_emision: string
+  monto_pagado: number
   clientes_externos: { nombre: string } | null
 }
 
@@ -120,8 +121,9 @@ export function buildFacturaExternaHtml(
 ): string {
   const folio = factura.id.slice(-8).toUpperCase()
   const today = new Date().toLocaleDateString('es-DO', { dateStyle: 'long' })
-  const estadoLabel = factura.estado === 'pagada' ? 'Pagada' : 'Pendiente de pago'
-  const estadoColor = factura.estado === 'pagada' ? '#16a34a' : '#d97706'
+  const estadoLabel = factura.estado === 'pagada' ? 'Pagada' : factura.estado === 'parcial' ? 'Pago parcial' : 'Pendiente de pago'
+  const estadoColor = factura.estado === 'pagada' ? '#16a34a' : factura.estado === 'parcial' ? '#2563eb' : '#d97706'
+  const saldo = Math.max(0, factura.total - factura.monto_pagado)
 
   const filas = trabajos.map(t => `<tr>
     <td style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
@@ -170,8 +172,9 @@ export function buildFacturaExternaHtml(
       </tr></thead>
       <tbody>${filas}</tbody>
     </table>
-    <div style="display:flex;justify-content:flex-end;margin-top:16px;padding-top:12px;border-top:2px solid #0f172a;">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-top:16px;padding-top:12px;border-top:2px solid #0f172a;">
       <p style="font-size:22px;font-weight:800;color:#0f172a;margin:0;">${fmtMoney(factura.total)}</p>
+      ${factura.estado === 'parcial' ? `<p style="font-size:12px;color:#2563eb;margin:0;font-weight:600;">Pago parcial recibido: ${fmtMoney(factura.monto_pagado)} · Saldo: ${fmtMoney(saldo)}</p>` : ''}
     </div>
   </div>
 

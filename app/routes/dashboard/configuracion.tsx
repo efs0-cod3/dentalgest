@@ -807,18 +807,36 @@ function PeligroSection() {
   return (
     <div className="space-y-4">
       <SectionCard title="Exportar datos">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <p className="text-sm font-medium text-gray-900">Descargar todos los datos</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Exporta pacientes, citas, pagos, cotizaciones y órdenes de laboratorio en formato JSON.
-            </p>
+        <div className="space-y-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Exportar todo (CSV)</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Descarga un .zip con un archivo CSV por cada tabla: pacientes, citas, pagos, deudas,
+                cotizaciones, órdenes de laboratorio, doctores, tratamientos, expediente, documentos,
+                odontogramas y el módulo de trabajos externos (clientes, trabajos, facturas y pagos).
+                Ideal para abrir en Excel o Google Sheets.
+              </p>
+            </div>
+            <a href="/api/export-todo-csv"
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+              <Download size={14} />
+              Exportar CSV
+            </a>
           </div>
-          <a href="/api/export-datos"
-            className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
-            <Download size={14} />
-            Exportar
-          </a>
+          <div className="flex items-start justify-between gap-4 pt-4 border-t border-gray-100">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Exportar todo (JSON)</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Mismos datos en un solo archivo estructurado, útil para respaldos técnicos o migraciones.
+              </p>
+            </div>
+            <a href="/api/export-datos"
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2 text-sm font-medium bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors">
+              <Download size={14} />
+              Exportar JSON
+            </a>
+          </div>
         </div>
       </SectionCard>
 
