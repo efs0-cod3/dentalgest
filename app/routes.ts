@@ -7,6 +7,8 @@ export default [
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
   route('api/export-datos', 'routes/api.export-datos.ts'),
   route('verificar/:id', 'routes/verificar.$id.tsx'),
+  route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
+  route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),
   layout('routes/dashboard/layout.tsx', [
     route('dashboard', 'routes/dashboard/index.tsx'),
     route('dashboard/citas', 'routes/dashboard/citas.tsx'),
@@ -14,6 +16,7 @@ export default [
     route('dashboard/caja', 'routes/dashboard/caja.tsx'),
     route('dashboard/cotizaciones', 'routes/dashboard/cotizaciones.tsx'),
     route('dashboard/laboratorio', 'routes/dashboard/laboratorio.tsx'),
+    route('dashboard/trabajos-externos', 'routes/dashboard/trabajos-externos.tsx'),
     route('dashboard/configuracion', 'routes/dashboard/configuracion.tsx'),
     route('dashboard/odontograma/:id', 'routes/dashboard/odontograma.$id.tsx'),
   ]),

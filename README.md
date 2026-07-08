@@ -65,8 +65,12 @@ Ejecuta las migraciones SQL en el editor de Supabase. Las tablas principales son
 ```
 clinicas, perfiles, doctores, tratamientos, pacientes,
 citas, pagos, deudas, cotizaciones, cotizacion_items,
-ordenes_laboratorio, expediente_entradas, documentos, config_clinica
+ordenes_laboratorio, expediente_entradas, documentos, config_clinica,
+clientes_externos, trabajos_externos, facturas_externas
 ```
+
+El módulo "Trabajos externos" además requiere un bucket público de Storage llamado
+`trabajos-externos` (Dashboard → Storage → New bucket).
 
 ### 4. Servidor de desarrollo
 
