@@ -115,7 +115,13 @@ export async function action({ request }: Route.ActionArgs) {
 
   // ── clientes ──
   if (intent === 'delete_cliente') {
-    await supabase.from('clientes_externos').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const clienteId = fd.get('id') as string
+    // cascade manually: jobs reference invoices and both reference the client,
+    // so the FK would silently block a bare client delete
+    await supabase.from('trabajos_externos').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
+    await supabase.from('facturas_externas').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('clientes_externos').delete().eq('id', clienteId).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message, intent }
     return { ok: true }
   }
   if (intent === 'create_cliente' || intent === 'update_cliente') {
@@ -1016,7 +1022,7 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
   useEffect(() => {
     if (clienteDetalle) {
       const updated = clientes.find(c => c.id === clienteDetalle.id)
-      if (updated) setClienteDetalle(updated)
+      setClienteDetalle(updated ?? null)
     }
   }, [clientes])
 
