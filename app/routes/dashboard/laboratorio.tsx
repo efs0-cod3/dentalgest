@@ -9,6 +9,7 @@ import {
   AlertTriangle, FlaskConical, Calendar, Printer,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -479,6 +480,7 @@ function OrdenCard({
   const pastDue = isPastDue(orden);
   const { label, color, Icon } = estadoConfig[orden.estado];
   const dias = orden.fecha_prometida ? diasRestantes(orden.fecha_prometida) : null;
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   function handlePrint() {
     const w = window.open("", "_blank", "width=600,height=800");
@@ -488,8 +490,11 @@ function OrdenCard({
     w.focus();
   }
 
+  useEffect(() => {
+    if (deleteFetcher.state === "idle" && deleteFetcher.data) setConfirmDeleteOpen(false);
+  }, [deleteFetcher.state, deleteFetcher.data]);
+
   function confirmDelete() {
-    if (!confirm("¿Eliminar esta orden?")) return;
     const fd = new FormData();
     fd.set("intent", "delete");
     fd.set("id", orden.id);
@@ -560,7 +565,7 @@ function OrdenCard({
           </button>
           <button
             type="button"
-            onClick={confirmDelete}
+            onClick={() => setConfirmDeleteOpen(true)}
             disabled={deleteFetcher.state !== "idle"}
             className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50"
           >
@@ -568,6 +573,17 @@ function OrdenCard({
           </button>
         </div>
       </div>
+
+      {confirmDeleteOpen && (
+        <ConfirmDeleteModal
+          title="Eliminar orden"
+          itemLabel={orden.titulo}
+          description={`${orden.pacientes?.nombre ?? "Sin paciente"} · solicitada ${fmtDate(orden.fecha_solicitud)}. Esta acción no se puede deshacer.`}
+          isSubmitting={deleteFetcher.state !== "idle"}
+          onCancel={() => setConfirmDeleteOpen(false)}
+          onConfirm={confirmDelete}
+        />
+      )}
 
       {/* dates + cost */}
       <div className="flex items-center justify-between text-xs">

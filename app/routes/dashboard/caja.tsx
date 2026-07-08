@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { createPortal } from "react-dom";
-import { Form, useLoaderData, useNavigation, useFetcher } from "react-router";
+import { Form, useLoaderData, useNavigation, useFetcher, useSubmit } from "react-router";
 import type { Route } from "./+types/caja";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
 import { getClinicaId } from "~/lib/clinica.server";
+import { useCloseOnSubmit } from "~/lib/hooks";
 import {
   Plus,
   X,
@@ -24,6 +25,7 @@ import {
 import { cn } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
+import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -263,7 +265,13 @@ function DeudaCard({
   deuda: Deuda;
   onAbonar: (d: Deuda) => void;
 }) {
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const navigation = useNavigation();
+  const submit = useSubmit();
+  useCloseOnSubmit(() => setConfirmCancel(false));
+
   return (
+    <>
     <div
       className={cn(
         "bg-white rounded-xl border p-4 space-y-3",
@@ -329,21 +337,13 @@ function DeudaCard({
             {deuda.saldo > 0 ? `Falta ${fmt(deuda.saldo)}` : "Monto cubierto"}
           </p>
           <div className="flex gap-2">
-            <Form
-              method="post"
-              onSubmit={(e) => {
-                if (!confirm("¿Cancelar esta cuenta?")) e.preventDefault();
-              }}
+            <button
+              type="button"
+              onClick={() => setConfirmCancel(true)}
+              className="text-xs text-gray-400 hover:text-red-500 transition-colors"
             >
-              <input type="hidden" name="intent" value="cancel-deuda" />
-              <input type="hidden" name="id" value={deuda.id} />
-              <button
-                type="submit"
-                className="text-xs text-gray-400 hover:text-red-500 transition-colors"
-              >
-                Cancelar
-              </button>
-            </Form>
+              Cancelar
+            </button>
             {deuda.saldo > 0 && (
               <button
                 onClick={() => onAbonar(deuda)}
@@ -356,6 +356,19 @@ function DeudaCard({
         </div>
       )}
     </div>
+
+    {confirmCancel && (
+      <ConfirmDeleteModal
+        title="Cancelar cuenta"
+        itemLabel={deuda.concepto}
+        description={`${deuda.pacientes?.nombre ?? "Sin paciente"} · ${fmt(deuda.monto_total)}. Esta acción no se puede deshacer.`}
+        confirmLabel="Cancelar cuenta"
+        isSubmitting={navigation.state === "submitting"}
+        onCancel={() => setConfirmCancel(false)}
+        onConfirm={() => submit({ intent: "cancel-deuda", id: deuda.id }, { method: "post" })}
+      />
+    )}
+    </>
   );
 }
 
@@ -458,9 +471,7 @@ function NuevaDeudaModal({
   const [selectedTrats, setSelectedTrats] = useState<Tratamiento[]>([]);
   const [monto, setMonto] = useState("");
   const [concepto, setConcepto] = useState("");
-  useEffect(() => {
-    if (navigation.state === "idle" && navigation.formData) onClose();
-  }, [navigation.state]);
+  useCloseOnSubmit(onClose);
 
   function handleTratsChange(items: Tratamiento[]) {
     setSelectedTrats(items);
@@ -579,9 +590,7 @@ function NuevaDeudaModal({
 function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === "submitting";
-  useEffect(() => {
-    if (navigation.state === "idle" && navigation.formData) onClose();
-  }, [navigation.state]);
+  useCloseOnSubmit(onClose);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -734,7 +743,13 @@ function PagoDetalleModal({
   onEdit: () => void;
   onRecibo: () => void;
 }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const navigation = useNavigation();
+  const submit = useSubmit();
+  useCloseOnSubmit(() => setConfirmDelete(false));
+
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
         <div className="px-6 py-5 border-b border-gray-100">
@@ -845,24 +860,28 @@ function PagoDetalleModal({
           )}
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end">
-          <Form
-            method="post"
-            onSubmit={(e) => {
-              if (!confirm("¿Eliminar este movimiento?")) e.preventDefault();
-            }}
+          <button
+            type="button"
+            onClick={() => setConfirmDelete(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
           >
-            <input type="hidden" name="intent" value="delete" />
-            <input type="hidden" name="id" value={pago.id} />
-            <button
-              type="submit"
-              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-            >
-              <Trash2 size={13} /> Eliminar
-            </button>
-          </Form>
+            <Trash2 size={13} /> Eliminar
+          </button>
         </div>
       </div>
     </div>
+
+    {confirmDelete && (
+      <ConfirmDeleteModal
+        title="Eliminar movimiento"
+        itemLabel={pago.concepto}
+        description={`${pago.tipo === "egreso" ? "−" : "+"}${fmt(pago.monto)} · ${fmtDate(pago.fecha)}${pago.pacientes ? ` · ${pago.pacientes.nombre}` : ""}. Esta acción no se puede deshacer.`}
+        isSubmitting={navigation.state === "submitting"}
+        onCancel={() => setConfirmDelete(false)}
+        onConfirm={() => submit({ intent: "delete", id: pago.id }, { method: "post" })}
+      />
+    )}
+    </>
   );
 }
 
@@ -892,9 +911,7 @@ function PagoEditModal({
   const [monto, setMonto] = useState(pago ? String(pago.monto) : "");
   const [concepto, setConcepto] = useState(pago?.concepto ?? "");
 
-  useEffect(() => {
-    if (navigation.state === "idle" && navigation.formData) onClose();
-  }, [navigation.state]);
+  useCloseOnSubmit(onClose);
 
   function handleTratsChange(items: Tratamiento[]) {
     setSelectedTrats(items);
@@ -1348,6 +1365,10 @@ export default function Caja() {
   const [nuevaDeudaOpen, setNuevaDeudaOpen] = useState(false);
   const [abonoDeuda, setAbonoDeuda] = useState<Deuda | null>(null);
   const [reciboModal, setReciboModal] = useState<Pago | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Pago | null>(null);
+  const navigation = useNavigation();
+  const submit = useSubmit();
+  useCloseOnSubmit(() => setDeleteTarget(null));
 
   const filtered = useMemo(() => {
     if (tipoFilter === "todos") return pagos;
@@ -1685,11 +1706,7 @@ export default function Caja() {
                       <div className="flex items-center gap-1">
                         <button onClick={() => setReciboModal(p)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors" title="Ver recibo"><Printer size={14} /></button>
                         <button onClick={() => setEditModal({ open: true, pago: p })} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"><Pencil size={14} /></button>
-                        <Form method="post" onSubmit={(e) => { if (!confirm("¿Eliminar?")) e.preventDefault() }}>
-                          <input type="hidden" name="intent" value="delete" />
-                          <input type="hidden" name="id" value={p.id} />
-                          <button type="submit" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
-                        </Form>
+                        <button onClick={() => setDeleteTarget(p)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"><Trash2 size={14} /></button>
                       </div>
                     </td>
                   </tr>
@@ -1769,6 +1786,16 @@ export default function Caja() {
       )}
       {abonoDeuda && (
         <AbonoModal deuda={abonoDeuda} onClose={() => setAbonoDeuda(null)} />
+      )}
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar movimiento"
+          itemLabel={deleteTarget.concepto}
+          description={`${deleteTarget.tipo === "egreso" ? "−" : "+"}${fmt(deleteTarget.monto)} · ${fmtDate(deleteTarget.fecha)}${deleteTarget.pacientes ? ` · ${deleteTarget.pacientes.nombre}` : ""}. Esta acción no se puede deshacer.`}
+          isSubmitting={navigation.state === "submitting"}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => submit({ intent: "delete", id: deleteTarget.id }, { method: "post" })}
+        />
       )}
     </div>
   );

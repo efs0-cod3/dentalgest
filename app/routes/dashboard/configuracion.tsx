@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { cn } from '~/lib/utils'
+import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
   DollarSign, AlertTriangle, Plus, Pencil, Trash2, X, Check,
@@ -323,10 +324,12 @@ const ROLES = ['propietario', 'admin', 'recepcionista', 'doctor', 'laboratorio']
 function UsuariosSection({ perfiles }: { perfiles: Perfil[] }) {
   const f = useFetcher()
   const [inviting, setInviting] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Perfil | null>(null)
 
   useEffect(() => {
     if (f.data?.ok && f.data.intent === 'invite_user') setInviting(false)
-  }, [f.data])
+    if (f.state === 'idle') setDeleteTarget(null)
+  }, [f.data, f.state])
 
   return (
     <div className="space-y-4">
@@ -352,20 +355,32 @@ function UsuariosSection({ perfiles }: { perfiles: Perfil[] }) {
                   {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
               </div>
-              <f.Form method="post"
-                onSubmit={e => { if (!confirm('¿Quitar acceso a este usuario?')) e.preventDefault() }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity">
-                <input type="hidden" name="intent" value="remove_user" />
-                <input type="hidden" name="id" value={p.id} />
-                <button type="submit" className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
-                  <X size={13} />
-                </button>
-              </f.Form>
+              <button type="button" onClick={() => setDeleteTarget(p)}
+                className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
+                <X size={13} />
+              </button>
             </div>
           ))}
 
           {perfiles.length === 0 && (
             <p className="text-sm text-gray-400 py-2 px-2">Aún no hay usuarios registrados.</p>
+          )}
+
+          {deleteTarget && (
+            <ConfirmDeleteModal
+              title="Quitar acceso"
+              itemLabel={deleteTarget.email ?? '(sin email)'}
+              description={`Perderá acceso a la clínica de inmediato. Rol actual: ${deleteTarget.rol}.`}
+              confirmLabel="Quitar acceso"
+              isSubmitting={f.state !== 'idle'}
+              onCancel={() => setDeleteTarget(null)}
+              onConfirm={() => {
+                const fd = new FormData()
+                fd.append('intent', 'remove_user')
+                fd.append('id', deleteTarget.id)
+                f.submit(fd, { method: 'post' })
+              }}
+            />
           )}
         </div>
 
@@ -413,12 +428,15 @@ function DoctoresSection({ doctores }: { doctores: Doctor[] }) {
   const f = useFetcher()
   const [editing, setEditing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Doctor | null>(null)
 
   useEffect(() => {
     if (!f.data?.ok) return
     if (f.data.intent === 'create_doctor') setAdding(false)
     if (f.data.intent === 'update_doctor') setEditing(null)
   }, [f.data])
+
+  useEffect(() => { if (f.state === 'idle') setDeleteTarget(null) }, [f.state])
 
   return (
     <SectionCard title="Doctores" description="Perfil de cada médico — el color se usa en la agenda">
@@ -456,15 +474,10 @@ function DoctoresSection({ doctores }: { doctores: Doctor[] }) {
                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
                     <Pencil size={13} />
                   </button>
-                  <f.Form method="post"
-                    onSubmit={e => { if (!confirm(`¿Eliminar a ${doc.nombre}?`)) e.preventDefault() }}>
-                    <input type="hidden" name="intent" value="delete_doctor" />
-                    <input type="hidden" name="id" value={doc.id} />
-                    <button type="submit"
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
-                      <Trash2 size={13} />
-                    </button>
-                  </f.Form>
+                  <button type="button" onClick={() => setDeleteTarget(doc)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                    <Trash2 size={13} />
+                  </button>
                 </div>
               </div>
             )}
@@ -499,6 +512,21 @@ function DoctoresSection({ doctores }: { doctores: Doctor[] }) {
       {f.data && !f.data.ok && (
         <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{f.data.error}</p>
       )}
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar doctor"
+          itemLabel={deleteTarget.nombre}
+          description={`${deleteTarget.especialidad ?? 'Sin especialidad'}. Esta acción no se puede deshacer.`}
+          isSubmitting={f.state !== 'idle'}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const fd = new FormData()
+            fd.append('intent', 'delete_doctor')
+            fd.append('id', deleteTarget.id)
+            f.submit(fd, { method: 'post' })
+          }}
+        />
+      )}
     </SectionCard>
   )
 }
@@ -511,12 +539,15 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
   const f = useFetcher()
   const [editing, setEditing] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Tratamiento | null>(null)
 
   useEffect(() => {
     if (!f.data?.ok) return
     if (f.data.intent === 'create_tratamiento') setAdding(false)
     if (f.data.intent === 'update_tratamiento') setEditing(null)
   }, [f.data])
+
+  useEffect(() => { if (f.state === 'idle') setDeleteTarget(null) }, [f.state])
 
   return (
     <SectionCard title="Catálogo de tratamientos" description="Servicios con precio, duración y color para la agenda">
@@ -568,15 +599,10 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
                     className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg">
                     <Pencil size={13} />
                   </button>
-                  <f.Form method="post"
-                    onSubmit={e => { if (!confirm(`¿Eliminar "${t.nombre}"?`)) e.preventDefault() }}>
-                    <input type="hidden" name="intent" value="delete_tratamiento" />
-                    <input type="hidden" name="id" value={t.id} />
-                    <button type="submit"
-                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
-                      <Trash2 size={13} />
-                    </button>
-                  </f.Form>
+                  <button type="button" onClick={() => setDeleteTarget(t)}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                    <Trash2 size={13} />
+                  </button>
                 </div>
               </div>
             )}
@@ -614,6 +640,21 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
       </div>
       {f.data && !f.data.ok && (
         <p className="mt-3 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{f.data.error}</p>
+      )}
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Eliminar tratamiento"
+          itemLabel={deleteTarget.nombre}
+          description={`${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(deleteTarget.precio)} · ${deleteTarget.duracion_min} min. Esta acción no se puede deshacer.`}
+          isSubmitting={f.state !== 'idle'}
+          onCancel={() => setDeleteTarget(null)}
+          onConfirm={() => {
+            const fd = new FormData()
+            fd.append('intent', 'delete_tratamiento')
+            fd.append('id', deleteTarget.id)
+            f.submit(fd, { method: 'post' })
+          }}
+        />
       )}
     </SectionCard>
   )
