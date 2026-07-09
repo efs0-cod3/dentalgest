@@ -178,6 +178,11 @@ export async function action({ request, params }: Route.ActionArgs) {
     return { ok: true }
   }
 
+  if (intent === 'delete-odontograma') {
+    await supabase.from('odontogramas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    return { ok: true }
+  }
+
   if (intent === 'delete-documento') {
     const path = fd.get('storage_path') as string
     await supabase.storage.from('documentos').remove([path])
@@ -262,14 +267,19 @@ function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
 
 function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }) {
   const fetcher = useFetcher<typeof action>()
+  const navigation = useNavigation()
+  const submit = useSubmit()
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const latest = odontogramas[0] ?? null
   const [viewingId, setViewingId] = useState<string | null>(null)
   const viewing = viewingId ? odontogramas.find(o => o.id === viewingId) ?? null : null
   const isHistorical = viewing !== null
+  const activeVersion = isHistorical ? viewing : latest
 
   const [data, setData] = useState<OdontogramaData>(latest?.datos ?? {})
   const [notas, setNotas] = useState(latest?.notas ?? '')
   const isSubmitting = fetcher.state !== 'idle'
+  const isDeleting = navigation.state === 'submitting'
   const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
 
   // after saving, the loader revalidates and `latest` becomes the just-saved row;
@@ -279,8 +289,16 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latest?.id])
 
+  useEffect(() => { if (navigation.state === 'idle') setConfirmDelete(false) }, [navigation.state])
+
   function handleSave() {
     fetcher.submit({ intent: 'create-odontograma', datos: JSON.stringify(data), notas }, { method: 'post' })
+  }
+
+  function handleDelete() {
+    if (!activeVersion) return
+    submit({ intent: 'delete-odontograma', id: activeVersion.id }, { method: 'post' })
+    setViewingId(null)
   }
 
   const displayData = isHistorical ? viewing!.datos : data
@@ -308,7 +326,10 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
       {isHistorical && (
         <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
           <span>Viendo una versión anterior ({fmtDateTime(viewing!.created_at)}), de solo lectura.</span>
-          <button onClick={() => setViewingId(null)} className="font-semibold underline flex-shrink-0">Volver a la actual</button>
+          <div className="flex items-center gap-3 flex-shrink-0">
+            <button onClick={() => setConfirmDelete(true)} className="font-semibold underline text-red-600">Eliminar versión</button>
+            <button onClick={() => setViewingId(null)} className="font-semibold underline">Volver a la actual</button>
+          </div>
         </div>
       )}
 
@@ -333,12 +354,29 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
               isSubmitting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow')}>
             <Save size={14} /> {isSubmitting ? 'Guardando…' : 'Guardar nueva versión'}
           </button>
+          {latest && (
+            <button onClick={() => setConfirmDelete(true)}
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
+              <Trash2 size={13} /> Eliminar versión
+            </button>
+          )}
           {saved && (
             <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
               <CheckCircle size={13} /> Guardado
             </span>
           )}
         </div>
+      )}
+
+      {confirmDelete && activeVersion && (
+        <ConfirmDeleteModal
+          title="Eliminar versión del odontograma"
+          itemLabel={fmtDateTime(activeVersion.created_at)}
+          description="Esta versión se eliminará permanentemente y no aparecerá más en el historial. Esta acción no se puede deshacer."
+          isSubmitting={isDeleting}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   )
