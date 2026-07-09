@@ -3,7 +3,7 @@ import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit } from '
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
-import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText } from 'lucide-react'
+import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
 import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -664,6 +664,24 @@ export default function Citas() {
     return citas.filter(c => c.estado === estadoFilter)
   }, [citas, estadoFilter])
 
+  const statsSemana = useMemo(() => {
+    const inicioSemana = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay())
+    const finSemana = new Date(inicioSemana.getFullYear(), inicioSemana.getMonth(), inicioSemana.getDate() + 7)
+    const citasSemana = citas.filter(c => {
+      const d = new Date(c.fecha_hora)
+      return d >= inicioSemana && d < finSemana
+    })
+    const confirmadas = citasSemana.filter(c => c.estado === 'confirmada').length
+    const concluidas = citasSemana.filter(c => c.estado === 'completada' || c.estado === 'cancelada')
+    const completadas = concluidas.filter(c => c.estado === 'completada').length
+    return {
+      total: citasSemana.length,
+      confirmadas,
+      tasaAsistencia: concluidas.length > 0 ? Math.round((completadas / concluidas.length) * 100) : null,
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citas])
+
   function setView(v: string) {
     setSearchParams(prev => { prev.set('view', v); return prev }, { replace: true })
   }
@@ -695,6 +713,42 @@ export default function Citas() {
           <span className="hidden sm:inline">Nueva cita</span>
           <span className="sm:hidden">Nueva</span>
         </button>
+      </div>
+
+      {/* weekly stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 md:mb-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <Calendar size={13} /> Citas esta semana
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{statsSemana.total}</p>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <UserCheck size={13} /> Confirmadas
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {statsSemana.confirmadas} <span className="text-sm font-medium text-gray-400">/ {statsSemana.total}</span>
+          </p>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+            <div className="h-1.5 rounded-full bg-blue-500 transition-all"
+              style={{ width: `${statsSemana.total > 0 ? (statsSemana.confirmadas / statsSemana.total) * 100 : 0}%` }} />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <TrendingUp size={13} /> Tasa de asistencia
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {statsSemana.tasaAsistencia === null ? '—' : `${statsSemana.tasaAsistencia}%`}
+          </p>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+            <div className="h-1.5 rounded-full bg-green-500 transition-all"
+              style={{ width: `${statsSemana.tasaAsistencia ?? 0}%` }} />
+          </div>
+        </div>
       </div>
 
       {/* toolbar */}
