@@ -15,11 +15,11 @@ export default [
     route('dashboard', 'routes/dashboard/index.tsx'),
     route('dashboard/citas', 'routes/dashboard/citas.tsx'),
     route('dashboard/pacientes', 'routes/dashboard/pacientes.tsx'),
+    route('dashboard/pacientes/:id', 'routes/dashboard/pacientes.$id.tsx'),
     route('dashboard/caja', 'routes/dashboard/caja.tsx'),
     route('dashboard/cotizaciones', 'routes/dashboard/cotizaciones.tsx'),
     route('dashboard/laboratorio', 'routes/dashboard/laboratorio.tsx'),
     route('dashboard/trabajos-externos', 'routes/dashboard/trabajos-externos.tsx'),
     route('dashboard/configuracion', 'routes/dashboard/configuracion.tsx'),
-    route('dashboard/odontograma/:id', 'routes/dashboard/odontograma.$id.tsx'),
   ]),
 ] satisfies RouteConfig
