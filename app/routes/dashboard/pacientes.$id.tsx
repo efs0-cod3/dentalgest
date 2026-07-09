@@ -179,7 +179,12 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (intent === 'delete-odontograma') {
-    await supabase.from('odontogramas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error, count } = await supabase.from('odontogramas')
+      .delete({ count: 'exact' })
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
+    if (!count) return { ok: false, error: 'No se pudo eliminar (0 filas afectadas) — revisa el permiso de DELETE en la política de RLS de "odontogramas".' }
     return { ok: true }
   }
 
@@ -267,8 +272,7 @@ function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
 
 function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }) {
   const fetcher = useFetcher<typeof action>()
-  const navigation = useNavigation()
-  const submit = useSubmit()
+  const deleteFetcher = useFetcher<typeof action>()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const latest = odontogramas[0] ?? null
   const [viewingId, setViewingId] = useState<string | null>(null)
@@ -279,7 +283,7 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
   const [data, setData] = useState<OdontogramaData>(latest?.datos ?? {})
   const [notas, setNotas] = useState(latest?.notas ?? '')
   const isSubmitting = fetcher.state !== 'idle'
-  const isDeleting = navigation.state === 'submitting'
+  const isDeleting = deleteFetcher.state !== 'idle'
   const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
 
   // after saving, the loader revalidates and `latest` becomes the just-saved row;
@@ -289,7 +293,14 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [latest?.id])
 
-  useEffect(() => { if (navigation.state === 'idle') setConfirmDelete(false) }, [navigation.state])
+  // dedicated fetcher (not the shared page navigation state) so a failed delete
+  // surfaces its own error instead of silently closing the modal either way
+  useEffect(() => {
+    if (deleteFetcher.state === 'idle' && deleteFetcher.data?.ok === true) {
+      setConfirmDelete(false)
+      setViewingId(null)
+    }
+  }, [deleteFetcher.state, deleteFetcher.data])
 
   function handleSave() {
     fetcher.submit({ intent: 'create-odontograma', datos: JSON.stringify(data), notas }, { method: 'post' })
@@ -297,8 +308,7 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
 
   function handleDelete() {
     if (!activeVersion) return
-    submit({ intent: 'delete-odontograma', id: activeVersion.id }, { method: 'post' })
-    setViewingId(null)
+    deleteFetcher.submit({ intent: 'delete-odontograma', id: activeVersion.id }, { method: 'post' })
   }
 
   const displayData = isHistorical ? viewing!.datos : data
@@ -372,7 +382,11 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
         <ConfirmDeleteModal
           title="Eliminar versión del odontograma"
           itemLabel={fmtDateTime(activeVersion.created_at)}
-          description="Esta versión se eliminará permanentemente y no aparecerá más en el historial. Esta acción no se puede deshacer."
+          description={
+            deleteFetcher.data?.ok === false
+              ? `Error: ${deleteFetcher.data.error}`
+              : 'Esta versión se eliminará permanentemente y no aparecerá más en el historial. Esta acción no se puede deshacer.'
+          }
           isSubmitting={isDeleting}
           onCancel={() => setConfirmDelete(false)}
           onConfirm={handleDelete}
