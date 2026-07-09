@@ -682,6 +682,19 @@ export default function Citas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [citas])
 
+  const citasHoy = useMemo(() =>
+    citas
+      .filter(c => {
+        const d = new Date(c.fecha_hora)
+        return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+      })
+      .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [citas]
+  )
+
+  const fmtHoy = today.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })
+
   function setView(v: string) {
     setSearchParams(prev => { prev.set('view', v); return prev }, { replace: true })
   }
@@ -751,64 +764,97 @@ export default function Citas() {
         </div>
       </div>
 
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        {/* estado filter — scrollable on mobile */}
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto max-w-full">
-          {['todos', ...ESTADOS].map(e => (
-            <button
-              key={e}
-              onClick={() => setEstadoFilter(e)}
-              className={cn(
-                'px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize whitespace-nowrap flex-shrink-0',
-                estadoFilter === e ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              {e}
-            </button>
-          ))}
+      <div className="flex flex-col lg:flex-row gap-4">
+        <div className="flex-1 min-w-0">
+          {/* toolbar */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            {/* estado filter — scrollable on mobile */}
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto max-w-full">
+              {['todos', ...ESTADOS].map(e => (
+                <button
+                  key={e}
+                  onClick={() => setEstadoFilter(e)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize whitespace-nowrap flex-shrink-0',
+                    estadoFilter === e ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  )}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+
+            <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+              <button
+                onClick={() => setView('tabla')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'tabla' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <List size={13} /> Tabla
+              </button>
+              <button
+                onClick={() => setView('calendario')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'calendario' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Calendar size={13} /> Cal
+              </button>
+            </div>
+          </div>
+
+          {/* content */}
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            {view === 'tabla' ? (
+              <TablaView
+                citas={filteredCitas}
+                onDetalle={c => setDetalle(c)}
+                onEdit={c => setModal({ open: true, cita: c })}
+              />
+            ) : (
+              <CalendarView
+                citas={filteredCitas}
+                year={calYear}
+                month={calMonth}
+                onEdit={c => setDetalle(c)}
+                onPrev={prevMonth}
+                onNext={nextMonth}
+              />
+            )}
+          </div>
         </div>
 
-        <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
-          <button
-            onClick={() => setView('tabla')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
-              view === 'tabla' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+        {/* daily summary panel */}
+        <div className="lg:w-80 flex-shrink-0">
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 lg:sticky lg:top-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Resumen del día</p>
+            <p className="text-sm font-semibold text-gray-900 mb-3 capitalize">{fmtHoy}</p>
+            {citasHoy.length === 0 ? (
+              <p className="text-sm text-gray-400">Sin citas para hoy.</p>
+            ) : (
+              <div className="space-y-3">
+                {citasHoy.map(c => (
+                  <div key={c.id} className="flex items-start justify-between gap-2 pb-3 border-b border-gray-100 last:border-0 last:pb-0">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Clock size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">
+                          {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                        <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
+                      </div>
+                    </div>
+                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0', estadoStyle[c.estado])}>{c.estado}</span>
+                  </div>
+                ))}
+              </div>
             )}
-          >
-            <List size={13} /> Tabla
-          </button>
-          <button
-            onClick={() => setView('calendario')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
-              view === 'calendario' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            )}
-          >
-            <Calendar size={13} /> Cal
-          </button>
+          </div>
         </div>
-      </div>
-
-      {/* content */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        {view === 'tabla' ? (
-          <TablaView
-            citas={filteredCitas}
-            onDetalle={c => setDetalle(c)}
-            onEdit={c => setModal({ open: true, cita: c })}
-          />
-        ) : (
-          <CalendarView
-            citas={filteredCitas}
-            year={calYear}
-            month={calMonth}
-            onEdit={c => setDetalle(c)}
-            onPrev={prevMonth}
-            onNext={nextMonth}
-          />
-        )}
       </div>
 
       {/* detail modal */}
