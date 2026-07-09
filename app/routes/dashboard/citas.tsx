@@ -4,7 +4,7 @@ import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText } from 'lucide-react'
-import { cn } from '~/lib/utils'
+import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
@@ -104,11 +104,6 @@ function toDatetimeLocal(iso: string) {
   const d = new Date(new Date(iso).getTime() - DR_OFFSET_MS)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
-}
-
-function drLocalToUTC(localStr: string) {
-  // Interpret the datetime-local string as DR time (UTC-4)
-  return new Date(localStr + '-04:00').toISOString()
 }
 
 function daysInMonth(year: number, month: number) {
