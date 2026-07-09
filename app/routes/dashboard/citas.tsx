@@ -526,6 +526,101 @@ function TablaView({
   )
 }
 
+// ─── week view ───────────────────────────────────────────────────────────────
+
+const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+
+function WeekView({
+  citas,
+  weekStart,
+  onEdit,
+  onPrev,
+  onNext,
+  onToday,
+}: {
+  citas: Cita[]
+  weekStart: Date
+  onEdit: (c: Cita) => void
+  onPrev: () => void
+  onNext: () => void
+  onToday: () => void
+}) {
+  const days = Array.from({ length: 7 }, (_, i) =>
+    new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i))
+  const weekEndExclusive = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7)
+
+  const citasByDay = useMemo(() => {
+    const map: Record<string, Cita[]> = {}
+    for (const c of citas) {
+      const d = new Date(c.fecha_hora)
+      if (d >= weekStart && d < weekEndExclusive) {
+        const key = d.toDateString()
+        if (!map[key]) map[key] = []
+        map[key].push(c)
+      }
+    }
+    for (const key in map) map[key].sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime())
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citas, weekStart.getTime()])
+
+  const rangeLabel = `${days[0].toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  const today = new Date()
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <button onClick={onPrev} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <ChevronLeft size={16} />
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-800 capitalize">{rangeLabel}</span>
+          <button onClick={onToday} className="text-xs font-medium text-blue-600 hover:underline">Hoy</button>
+        </div>
+        <button onClick={onNext} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 divide-x divide-gray-100">
+        {days.map((d, i) => {
+          const isToday = d.toDateString() === today.toDateString()
+          const dayCitas = citasByDay[d.toDateString()] ?? []
+          return (
+            <div key={i} className="min-h-[220px]">
+              <div className={cn('text-center py-2 border-b border-gray-100', isToday && 'bg-blue-50')}>
+                <p className="text-xs font-semibold text-gray-400 uppercase">{DIAS_CORTOS[i]}</p>
+                <span className={cn(
+                  'inline-flex items-center justify-center w-6 h-6 text-xs font-medium rounded-full mt-0.5',
+                  isToday ? 'bg-blue-600 text-white' : 'text-gray-700'
+                )}>
+                  {d.getDate()}
+                </span>
+              </div>
+              <div className="p-1.5 space-y-1">
+                {dayCitas.length === 0 ? (
+                  <p className="text-center text-xs text-gray-300 mt-2">—</p>
+                ) : dayCitas.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => onEdit(c)}
+                    className={cn('w-full text-left px-1.5 py-1 rounded text-xs', estadoStyle[c.estado])}
+                  >
+                    <p className="font-semibold">
+                      {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── calendar view ───────────────────────────────────────────────────────────
 
 function CalendarView({
@@ -655,6 +750,9 @@ export default function Citas() {
     return today.getMonth()
   })
 
+  const [weekStart, setWeekStart] = useState(() =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay()))
+
   const [estadoFilter, setEstadoFilter] = useState('todos')
   const [detalle, setDetalle] = useState<Cita | null>(null)
   const [modal, setModal] = useState<{ open: boolean; cita: Cita | null }>({ open: false, cita: null })
@@ -711,6 +809,19 @@ export default function Citas() {
       if (m === 11) { setCalYear(y => y + 1); return 0 }
       return m + 1
     })
+  }
+
+  function prevWeek() {
+    setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() - 7))
+  }
+
+  function nextWeek() {
+    setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() + 7))
+  }
+
+  function todayWeek() {
+    const t = new Date()
+    setWeekStart(new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay()))
   }
 
   return (
@@ -795,13 +906,22 @@ export default function Citas() {
                 <List size={13} /> Tabla
               </button>
               <button
+                onClick={() => setView('semana')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'semana' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Calendar size={13} /> Semana
+              </button>
+              <button
                 onClick={() => setView('calendario')}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
                   view === 'calendario' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
                 )}
               >
-                <Calendar size={13} /> Cal
+                <Calendar size={13} /> Mes
               </button>
             </div>
           </div>
@@ -813,6 +933,15 @@ export default function Citas() {
                 citas={filteredCitas}
                 onDetalle={c => setDetalle(c)}
                 onEdit={c => setModal({ open: true, cita: c })}
+              />
+            ) : view === 'semana' ? (
+              <WeekView
+                citas={filteredCitas}
+                weekStart={weekStart}
+                onEdit={c => setDetalle(c)}
+                onPrev={prevWeek}
+                onNext={nextWeek}
+                onToday={todayWeek}
               />
             ) : (
               <CalendarView
