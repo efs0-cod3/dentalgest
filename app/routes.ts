@@ -21,6 +21,5 @@ export default [
     route('dashboard/laboratorio', 'routes/dashboard/laboratorio.tsx'),
     route('dashboard/trabajos-externos', 'routes/dashboard/trabajos-externos.tsx'),
     route('dashboard/configuracion', 'routes/dashboard/configuracion.tsx'),
-    route('dashboard/odontograma/:id', 'routes/dashboard/odontograma.$id.tsx'),
   ]),
 ] satisfies RouteConfig

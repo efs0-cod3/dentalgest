@@ -7,12 +7,14 @@ import { getClinicaId } from '~/lib/clinica.server'
 import { buildPacienteData } from '~/lib/pacientes.server'
 import {
   ChevronLeft, Pencil, Trash2, Plus, Phone, Mail, FileText, Upload,
-  AlertCircle, Heart, Grid3x3, Clock, Calendar,
+  AlertCircle, Heart, Clock, Calendar, Save, CheckCircle,
 } from 'lucide-react'
 import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { PacienteEditModal } from '~/components/PacienteEditModal'
+import { Odontograma } from '~/components/Odontograma'
+import type { OdontogramaData } from '~/components/Odontograma'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -37,6 +39,7 @@ type Paciente = {
 }
 type Doctor = { id: string; nombre: string }
 type Tratamiento = { id: string; nombre: string; duracion_min: number }
+type OdontogramaVersion = { id: string; datos: OdontogramaData; notas: string | null; created_at: string }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -51,7 +54,17 @@ const tipoEntradaStyle: Record<string, string> = {
 
 function initials(n: string) { return n.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase() }
 function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' }) }
+function fmtDateShort(iso: string) { return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) }
 function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) }
+
+function calcularEdad(fechaNacimientoISO: string) {
+  const hoy = new Date()
+  const nac = new Date(fechaNacimientoISO)
+  let edad = hoy.getFullYear() - nac.getFullYear()
+  const aunNoCumple = hoy.getMonth() < nac.getMonth() || (hoy.getMonth() === nac.getMonth() && hoy.getDate() < nac.getDate())
+  if (aunNoCumple) edad--
+  return edad
+}
 
 export function meta({ data }: Route.MetaArgs) {
   return [{ title: `${data?.paciente?.nombre ?? 'Paciente'} — Nin Dental Clinic` }]
@@ -64,7 +77,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const clinicaId = await getClinicaId(request)
   const pacienteId = params.id as string
 
-  const [{ data }, { data: doctores }, { data: tratamientos }] = await Promise.all([
+  const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }] = await Promise.all([
     supabase.from('pacientes').select(`
       id, nombre, telefono, email, created_at,
       fecha_nacimiento, cedula, genero, direccion,
@@ -76,6 +89,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     `).eq('id', pacienteId).eq('clinica_id', clinicaId).single(),
     supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
     supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
+    supabase.from('odontogramas').select('id, datos, notas, created_at')
+      .eq('paciente_id', pacienteId).eq('clinica_id', clinicaId).order('created_at', { ascending: false }),
   ])
 
   if (!data) throw redirect('/dashboard/pacientes')
@@ -90,7 +105,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
   }
 
-  return { paciente, doctores: (doctores ?? []) as Doctor[], tratamientos: (tratamientos ?? []) as Tratamiento[] }
+  return {
+    paciente, doctores: (doctores ?? []) as Doctor[], tratamientos: (tratamientos ?? []) as Tratamiento[],
+    odontogramas: (odontogramas ?? []) as OdontogramaVersion[],
+  }
 }
 
 // ─── action ───────────────────────────────────────────────────────────────────
@@ -147,6 +165,16 @@ export async function action({ request, params }: Route.ActionArgs) {
         })
       }
     }
+    return { ok: true }
+  }
+
+  if (intent === 'create-odontograma') {
+    const datos = JSON.parse(fd.get('datos') as string)
+    const notas = (fd.get('notas') as string) || null
+    const { error } = await supabase.from('odontogramas').insert({
+      clinica_id: clinicaId, paciente_id: pacienteId, datos, notas,
+    })
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
@@ -225,6 +253,92 @@ function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
             {isSubmitting ? 'Agendando…' : 'Agendar'}
           </button>
         </fetcher.Form>
+      )}
+    </div>
+  )
+}
+
+// ─── odontograma tab ────────────────────────────────────────────────────────
+
+function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }) {
+  const fetcher = useFetcher<typeof action>()
+  const latest = odontogramas[0] ?? null
+  const [viewingId, setViewingId] = useState<string | null>(null)
+  const viewing = viewingId ? odontogramas.find(o => o.id === viewingId) ?? null : null
+  const isHistorical = viewing !== null
+
+  const [data, setData] = useState<OdontogramaData>(latest?.datos ?? {})
+  const [notas, setNotas] = useState(latest?.notas ?? '')
+  const isSubmitting = fetcher.state !== 'idle'
+  const saved = fetcher.state === 'idle' && fetcher.data?.ok === true
+
+  // after saving, the loader revalidates and `latest` becomes the just-saved row;
+  // keep the editable buffer in sync so it doesn't show stale pre-save data
+  useEffect(() => {
+    if (!isHistorical) { setData(latest?.datos ?? {}); setNotas(latest?.notas ?? '') }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [latest?.id])
+
+  function handleSave() {
+    fetcher.submit({ intent: 'create-odontograma', datos: JSON.stringify(data), notas }, { method: 'post' })
+  }
+
+  const displayData = isHistorical ? viewing!.datos : data
+  const displayNotas = isHistorical ? (viewing!.notas ?? '') : notas
+
+  return (
+    <div className="space-y-4">
+      {odontogramas.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button onClick={() => setViewingId(null)}
+            className={cn('px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors',
+              !isHistorical ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
+            Actual{latest ? ` · ${fmtDateShort(latest.created_at)}` : ''}
+          </button>
+          {odontogramas.slice(1).map(o => (
+            <button key={o.id} onClick={() => setViewingId(o.id)}
+              className={cn('px-2.5 py-1 rounded-lg text-xs font-medium border transition-colors',
+                viewingId === o.id ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
+              {fmtDateShort(o.created_at)}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {isHistorical && (
+        <div className="flex items-center justify-between gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
+          <span>Viendo una versión anterior ({fmtDateTime(viewing!.created_at)}), de solo lectura.</span>
+          <button onClick={() => setViewingId(null)} className="font-semibold underline flex-shrink-0">Volver a la actual</button>
+        </div>
+      )}
+
+      <Odontograma value={displayData} onChange={isHistorical ? undefined : setData} readOnly={isHistorical} />
+
+      <div className="space-y-2">
+        <label className="text-sm font-medium text-gray-700">Observaciones</label>
+        <textarea
+          value={displayNotas}
+          onChange={e => !isHistorical && setNotas(e.target.value)}
+          readOnly={isHistorical}
+          rows={3}
+          placeholder="Notas adicionales sobre el estado bucal del paciente…"
+          className="w-full rounded-xl border border-gray-200 px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        />
+      </div>
+
+      {!isHistorical && (
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} disabled={isSubmitting}
+            className={cn('flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all',
+              isSubmitting ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow')}>
+            <Save size={14} /> {isSubmitting ? 'Guardando…' : 'Guardar nueva versión'}
+          </button>
+          {saved && (
+            <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium">
+              <CheckCircle size={13} /> Guardado
+            </span>
+          )}
+        </div>
       )}
     </div>
   )
@@ -425,10 +539,10 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function PacienteDetalle() {
-  const { paciente, doctores, tratamientos } = useLoaderData<typeof loader>()
+  const { paciente, doctores, tratamientos, odontogramas } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const submit = useSubmit()
-  const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'documentos'>('datos')
+  const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'documentos' | 'odontograma'>('datos')
   const [editModal, setEditModal] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isDeleting = navigation.state === 'submitting'
@@ -439,6 +553,7 @@ export default function PacienteDetalle() {
     { id: 'clinico', label: `Clínico${paciente.expediente_entradas.length ? ` (${paciente.expediente_entradas.length})` : ''}` },
     { id: 'citas', label: `Citas${paciente.citas.length ? ` (${paciente.citas.length})` : ''}` },
     { id: 'documentos', label: `Documentos${paciente.documentos.length ? ` (${paciente.documentos.length})` : ''}` },
+    { id: 'odontograma', label: `Odontograma${odontogramas.length ? ` (${odontogramas.length})` : ''}` },
   ] as const
 
   const proximasCitas = useMemo(() =>
@@ -463,19 +578,13 @@ export default function PacienteDetalle() {
           <div>
             <h1 className="text-xl font-bold text-gray-900 leading-tight">{paciente.nombre}</h1>
             <p className="text-xs text-gray-400 mt-0.5">
-              {paciente.fecha_nacimiento ? `Nac. ${fmtDate(paciente.fecha_nacimiento)}` : 'Sin fecha de nacimiento'}
+              {paciente.fecha_nacimiento ? `${calcularEdad(paciente.fecha_nacimiento)} años` : 'Edad no registrada'}
               {paciente.tipo_sangre ? ` · ${paciente.tipo_sangre}` : ''}
               {paciente.telefono ? ` · ${paciente.telefono}` : ''}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
-          <Link
-            to={`/dashboard/odontograma/${paciente.id}`}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-purple-700 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
-          >
-            <Grid3x3 size={13} /> Odontograma
-          </Link>
           <button onClick={() => setEditModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <Pencil size={13} /> Editar
@@ -593,6 +702,8 @@ export default function PacienteDetalle() {
           )}
 
           {tab === 'documentos' && <TabDocumentos paciente={paciente} />}
+
+          {tab === 'odontograma' && <TabOdontograma odontogramas={odontogramas} />}
         </div>
 
         <div className="space-y-4">
