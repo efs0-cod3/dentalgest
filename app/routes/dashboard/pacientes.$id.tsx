@@ -648,6 +648,9 @@ export default function PacienteDetalle() {
               {paciente.telefono && (
                 <span className="flex items-center gap-1"><Phone size={11} className="text-gray-400" />{paciente.telefono}</span>
               )}
+              {paciente.email && (
+                <span className="flex items-center gap-1"><Mail size={11} className="text-gray-400" />{paciente.email}</span>
+              )}
               <span className="flex items-center gap-1">
                 <Clock size={11} className="text-gray-400" />
                 {visitaAnterior ? `Última visita: ${fmtDate(visitaAnterior.fecha_hora)}` : 'Sin visitas anteriores'}
