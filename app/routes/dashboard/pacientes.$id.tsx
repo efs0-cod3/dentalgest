@@ -616,6 +616,13 @@ export default function PacienteDetalle() {
     [paciente.citas]
   )
 
+  const visitaAnterior = useMemo(() =>
+    paciente.citas
+      .filter(c => new Date(c.fecha_hora) < new Date())
+      .sort((a, b) => new Date(b.fecha_hora).getTime() - new Date(a.fecha_hora).getTime())[0] ?? null,
+    [paciente.citas]
+  )
+
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
       <Link to="/dashboard/pacientes" className="inline-flex items-center gap-1 text-sm text-gray-400 hover:text-gray-700 mb-4">
@@ -623,17 +630,29 @@ export default function PacienteDetalle() {
       </Link>
 
       <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3 mb-5">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4 bg-blue-50/60 border border-blue-100 rounded-2xl px-4 py-3 flex-1">
           <div className="w-14 h-14 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xl flex-shrink-0">
             {initials(paciente.nombre)}
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">{paciente.nombre}</h1>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {paciente.fecha_nacimiento ? `${calcularEdad(paciente.fecha_nacimiento)} años` : 'Edad no registrada'}
-              {paciente.tipo_sangre ? ` · ${paciente.tipo_sangre}` : ''}
-              {paciente.telefono ? ` · ${paciente.telefono}` : ''}
-            </p>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-xl font-bold text-gray-900 leading-tight">{paciente.nombre}</h1>
+              {paciente.cedula && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-white text-gray-600 border border-gray-200">
+                  {paciente.cedula}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500 mt-1.5">
+              <span>{paciente.fecha_nacimiento ? `${calcularEdad(paciente.fecha_nacimiento)} años` : 'Edad no registrada'}</span>
+              {paciente.telefono && (
+                <span className="flex items-center gap-1"><Phone size={11} className="text-gray-400" />{paciente.telefono}</span>
+              )}
+              <span className="flex items-center gap-1">
+                <Clock size={11} className="text-gray-400" />
+                {visitaAnterior ? `Última visita: ${fmtDate(visitaAnterior.fecha_hora)}` : 'Sin visitas anteriores'}
+              </span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
