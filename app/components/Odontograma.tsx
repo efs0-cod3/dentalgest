@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { cn } from '~/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,6 +41,7 @@ function condStroke(c: Condicion) { return CONDS.find(x => x.id === c)?.stroke ?
 
 const UPPER = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28]
 const LOWER = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38]
+const ALL_TEETH = [...UPPER, ...LOWER]
 
 // ─── SVG constants ────────────────────────────────────────────────────────────
 
@@ -153,6 +154,15 @@ export function Odontograma({ value, onChange, readOnly = false }: OdontogramaPr
 
   const get = (id: string): DienteData => value[id] ?? emptyDiente()
 
+  const counts = useMemo(() => {
+    const c = Object.fromEntries(CONDS.map(cond => [cond.id, 0])) as Record<Condicion, number>
+    for (const n of ALL_TEETH) {
+      const d = get(String(n))
+      c[d.v]++; c[d.m]++; c[d.d]++; c[d.p]++; c[d.o]++
+    }
+    return c
+  }, [value])
+
   const handleSurface = useCallback((toothId: string, sup: Sup) => {
     if (!onChange) return
     const cur = get(toothId)
@@ -251,10 +261,13 @@ export function Odontograma({ value, onChange, readOnly = false }: OdontogramaPr
       {/* Conditions legend */}
       <div className="flex flex-wrap gap-x-3 gap-y-1.5 px-1">
         {CONDS.map(c => (
-          <div key={c.id} className="flex items-center gap-1.5">
+          <div key={c.id} className={cn('flex items-center gap-1.5', counts[c.id] === 0 && 'opacity-40')}>
             <div className="w-3 h-3 rounded-sm border shrink-0"
               style={{ backgroundColor: c.fill, borderColor: c.stroke }} />
             <span className="text-[11px] text-gray-500">{c.label}</span>
+            <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full bg-gray-100 text-[10px] font-semibold text-gray-600">
+              {counts[c.id]}
+            </span>
           </div>
         ))}
       </div>
