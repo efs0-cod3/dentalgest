@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
-import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit } from 'react-router'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit, useActionData } from 'react-router'
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
+import { getHorarioAgenda } from '~/lib/agenda.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
 import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
@@ -32,7 +33,7 @@ export function meta(): Route.MetaDescriptors {
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   const clinicaId = await getClinicaId(request)
-  const [{ data: citas }, { data: pacientes }, { data: doctores }, { data: tratamientos }] =
+  const [{ data: citas }, { data: pacientes }, { data: doctores }, { data: tratamientos }, horario] =
     await Promise.all([
       supabase
         .from('citas')
@@ -42,13 +43,20 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('pacientes').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
+      getHorarioAgenda(supabase, clinicaId),
     ])
   return {
     citas: (citas ?? []) as unknown as Cita[],
     pacientes: (pacientes ?? []) as Paciente[],
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
+    horario,
   }
+}
+
+function horaAMinutos(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number)
+  return h * 60 + m
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -73,9 +81,21 @@ export async function action({ request }: Route.ActionArgs) {
     notas: (fd.get('notas') as string) || null,
   }
 
-  if (intent === 'create') await supabase.from('citas').insert(data)
-  else if (intent === 'update')
-    await supabase.from('citas').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+  const horario = await getHorarioAgenda(supabase, clinicaId)
+  const horaLocal = toDatetimeLocal(data.fecha_hora).slice(11, 16)
+  const inicioCitaMin = horaAMinutos(horaLocal)
+  const finCitaMin = inicioCitaMin + data.duracion_min
+  if (inicioCitaMin < horaAMinutos(horario.inicio) || finCitaMin > horaAMinutos(horario.fin)) {
+    return { ok: false, error: `El horario de la clínica es de ${horario.inicio} a ${horario.fin}. La cita no cabe en ese rango.` }
+  }
+
+  if (intent === 'create') {
+    const { error } = await supabase.from('citas').insert(data)
+    if (error) return { ok: false, error: error.message }
+  } else if (intent === 'update') {
+    const { error } = await supabase.from('citas').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
+  }
 
   return { ok: true }
 }
@@ -101,7 +121,9 @@ function fmtDate(iso: string) {
 const DR_OFFSET_MS = -4 * 60 * 60 * 1000 // UTC-4, no DST
 
 function toDatetimeLocal(iso: string) {
-  const d = new Date(new Date(iso).getTime() - DR_OFFSET_MS)
+  // must be the exact inverse of drLocalToUTC (UTC = DR local + 4h, so DR local = UTC - 4h);
+  // DR_OFFSET_MS is already negative, so adding it subtracts the 4 hours
+  const d = new Date(new Date(iso).getTime() + DR_OFFSET_MS)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 }
@@ -241,15 +263,18 @@ function CitaModal({
   pacientes,
   doctores,
   tratamientos,
+  horario,
   onClose,
 }: {
   cita: Cita | null
   pacientes: Paciente[]
   doctores: Doctor[]
   tratamientos: Tratamiento[]
+  horario: { inicio: string; fin: string }
   onClose: () => void
 }) {
   const navigation = useNavigation()
+  const actionData = useActionData<typeof action>()
   const isSubmitting = navigation.state === 'submitting'
 
   // Split into date + time for display; hidden field submits UTC ISO
@@ -258,7 +283,16 @@ function CitaModal({
   const [fechaTime, setFechaTime] = useState(initial.slice(11, 16))
   const fechaLocal = fechaDate && fechaTime ? `${fechaDate}T${fechaTime}` : ''
 
-  useCloseOnSubmit(onClose)
+  // don't use useCloseOnSubmit here — it would close the modal even when the
+  // server rejects the appointment (outside horario), hiding the error
+  const wasSubmitting = useRef(false)
+  useEffect(() => {
+    if (navigation.state === 'submitting') wasSubmitting.current = true
+    else if (navigation.state === 'idle' && wasSubmitting.current) {
+      wasSubmitting.current = false
+      if (actionData?.ok !== false) onClose()
+    }
+  }, [navigation.state])
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
@@ -342,10 +376,13 @@ function CitaModal({
               <input
                 type="time"
                 required
+                min={horario.inicio}
+                max={horario.fin}
                 value={fechaTime}
                 onChange={e => setFechaTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <p className="text-xs text-gray-400 mt-1">Horario: {horario.inicio} – {horario.fin}</p>
             </div>
 
             <div>
@@ -383,6 +420,10 @@ function CitaModal({
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+
+          {actionData?.ok === false && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{actionData.error}</p>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -734,7 +775,7 @@ function CalendarView({
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function Citas() {
-  const { citas, pacientes, doctores, tratamientos } = useLoaderData<typeof loader>()
+  const { citas, pacientes, doctores, tratamientos, horario } = useLoaderData<typeof loader>()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const view = searchParams.get('view') ?? 'tabla'
@@ -1005,6 +1046,7 @@ export default function Citas() {
           pacientes={pacientes}
           doctores={doctores}
           tratamientos={tratamientos}
+          horario={horario}
           onClose={() => setModal({ open: false, cita: null })}
         />
       )}
