@@ -89,15 +89,58 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: false, error: `El horario de la clínica es de ${horario.inicio} a ${horario.fin}. La cita no cabe en ese rango.` }
   }
 
+  let citaId = fd.get('id') as string | null
+
   if (intent === 'create') {
-    const { error } = await supabase.from('citas').insert(data)
+    const { data: inserted, error } = await supabase.from('citas').insert(data).select('id').single()
     if (error) return { ok: false, error: error.message }
+    citaId = inserted.id
   } else if (intent === 'update') {
-    const { error } = await supabase.from('citas').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    citaId = fd.get('id') as string
+    const { error } = await supabase.from('citas').update(data).eq('id', citaId).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message }
   }
 
+  if (citaId && data.estado === 'completada' && data.paciente_id) {
+    await syncConsultaFromCita(supabase, clinicaId, citaId, data)
+  }
+
   return { ok: true }
+}
+
+// crea automáticamente la consulta correspondiente cuando una cita se marca
+// como completada, para que el doctor no tenga que capturar la misma
+// información dos veces. No se crea más de una vez por cita (cita_id único),
+// y no sobreescribe una consulta ya creada para no perder ediciones manuales.
+async function syncConsultaFromCita(
+  supabase: ReturnType<typeof createSupabaseServerClient>['supabase'],
+  clinicaId: string,
+  citaId: string,
+  data: { paciente_id: FormDataEntryValue | null; doctor_id: FormDataEntryValue | null; tratamiento_id: FormDataEntryValue | null; fecha_hora: string; notas: string | null },
+) {
+  const { data: existing } = await supabase
+    .from('expediente_entradas')
+    .select('id')
+    .eq('cita_id', citaId)
+    .maybeSingle()
+  if (existing) return
+
+  let titulo = 'Consulta'
+  if (data.tratamiento_id) {
+    const { data: tratamiento } = await supabase.from('tratamientos').select('nombre').eq('id', data.tratamiento_id as string).single()
+    if (tratamiento?.nombre) titulo = tratamiento.nombre
+  }
+
+  await supabase.from('expediente_entradas').insert({
+    clinica_id: clinicaId,
+    cita_id: citaId,
+    paciente_id: data.paciente_id as string,
+    doctor_id: (data.doctor_id as string) || null,
+    fecha: data.fecha_hora,
+    tipo: 'tratamiento',
+    titulo,
+    descripcion: data.notas,
+  })
 }
 
 // ─── helpers ────────────────────────────────────────────────────────────────
