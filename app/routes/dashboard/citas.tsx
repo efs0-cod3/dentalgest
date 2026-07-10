@@ -1,9 +1,10 @@
-import { useState, useMemo } from 'react'
-import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit } from 'react-router'
+import { useState, useMemo, useEffect, useRef } from 'react'
+import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit, useActionData } from 'react-router'
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
-import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText } from 'lucide-react'
+import { getHorarioAgenda } from '~/lib/agenda.server'
+import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
 import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -32,7 +33,7 @@ export function meta(): Route.MetaDescriptors {
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   const clinicaId = await getClinicaId(request)
-  const [{ data: citas }, { data: pacientes }, { data: doctores }, { data: tratamientos }] =
+  const [{ data: citas }, { data: pacientes }, { data: doctores }, { data: tratamientos }, horario] =
     await Promise.all([
       supabase
         .from('citas')
@@ -42,13 +43,20 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('pacientes').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
+      getHorarioAgenda(supabase, clinicaId),
     ])
   return {
     citas: (citas ?? []) as unknown as Cita[],
     pacientes: (pacientes ?? []) as Paciente[],
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
+    horario,
   }
+}
+
+function horaAMinutos(hhmm: string) {
+  const [h, m] = hhmm.split(':').map(Number)
+  return h * 60 + m
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -73,9 +81,21 @@ export async function action({ request }: Route.ActionArgs) {
     notas: (fd.get('notas') as string) || null,
   }
 
-  if (intent === 'create') await supabase.from('citas').insert(data)
-  else if (intent === 'update')
-    await supabase.from('citas').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+  const horario = await getHorarioAgenda(supabase, clinicaId)
+  const horaLocal = toDatetimeLocal(data.fecha_hora).slice(11, 16)
+  const inicioCitaMin = horaAMinutos(horaLocal)
+  const finCitaMin = inicioCitaMin + data.duracion_min
+  if (inicioCitaMin < horaAMinutos(horario.inicio) || finCitaMin > horaAMinutos(horario.fin)) {
+    return { ok: false, error: `El horario de la clínica es de ${horario.inicio} a ${horario.fin}. La cita no cabe en ese rango.` }
+  }
+
+  if (intent === 'create') {
+    const { error } = await supabase.from('citas').insert(data)
+    if (error) return { ok: false, error: error.message }
+  } else if (intent === 'update') {
+    const { error } = await supabase.from('citas').update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
+  }
 
   return { ok: true }
 }
@@ -101,7 +121,9 @@ function fmtDate(iso: string) {
 const DR_OFFSET_MS = -4 * 60 * 60 * 1000 // UTC-4, no DST
 
 function toDatetimeLocal(iso: string) {
-  const d = new Date(new Date(iso).getTime() - DR_OFFSET_MS)
+  // must be the exact inverse of drLocalToUTC (UTC = DR local + 4h, so DR local = UTC - 4h);
+  // DR_OFFSET_MS is already negative, so adding it subtracts the 4 hours
+  const d = new Date(new Date(iso).getTime() + DR_OFFSET_MS)
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 }
@@ -241,15 +263,18 @@ function CitaModal({
   pacientes,
   doctores,
   tratamientos,
+  horario,
   onClose,
 }: {
   cita: Cita | null
   pacientes: Paciente[]
   doctores: Doctor[]
   tratamientos: Tratamiento[]
+  horario: { inicio: string; fin: string }
   onClose: () => void
 }) {
   const navigation = useNavigation()
+  const actionData = useActionData<typeof action>()
   const isSubmitting = navigation.state === 'submitting'
 
   // Split into date + time for display; hidden field submits UTC ISO
@@ -258,7 +283,16 @@ function CitaModal({
   const [fechaTime, setFechaTime] = useState(initial.slice(11, 16))
   const fechaLocal = fechaDate && fechaTime ? `${fechaDate}T${fechaTime}` : ''
 
-  useCloseOnSubmit(onClose)
+  // don't use useCloseOnSubmit here — it would close the modal even when the
+  // server rejects the appointment (outside horario), hiding the error
+  const wasSubmitting = useRef(false)
+  useEffect(() => {
+    if (navigation.state === 'submitting') wasSubmitting.current = true
+    else if (navigation.state === 'idle' && wasSubmitting.current) {
+      wasSubmitting.current = false
+      if (actionData?.ok !== false) onClose()
+    }
+  }, [navigation.state])
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
@@ -342,10 +376,13 @@ function CitaModal({
               <input
                 type="time"
                 required
+                min={horario.inicio}
+                max={horario.fin}
                 value={fechaTime}
                 onChange={e => setFechaTime(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <p className="text-xs text-gray-400 mt-1">Horario: {horario.inicio} – {horario.fin}</p>
             </div>
 
             <div>
@@ -383,6 +420,10 @@ function CitaModal({
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+
+          {actionData?.ok === false && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{actionData.error}</p>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -526,6 +567,101 @@ function TablaView({
   )
 }
 
+// ─── week view ───────────────────────────────────────────────────────────────
+
+const DIAS_CORTOS = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb']
+
+function WeekView({
+  citas,
+  weekStart,
+  onEdit,
+  onPrev,
+  onNext,
+  onToday,
+}: {
+  citas: Cita[]
+  weekStart: Date
+  onEdit: (c: Cita) => void
+  onPrev: () => void
+  onNext: () => void
+  onToday: () => void
+}) {
+  const days = Array.from({ length: 7 }, (_, i) =>
+    new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i))
+  const weekEndExclusive = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7)
+
+  const citasByDay = useMemo(() => {
+    const map: Record<string, Cita[]> = {}
+    for (const c of citas) {
+      const d = new Date(c.fecha_hora)
+      if (d >= weekStart && d < weekEndExclusive) {
+        const key = d.toDateString()
+        if (!map[key]) map[key] = []
+        map[key].push(c)
+      }
+    }
+    for (const key in map) map[key].sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime())
+    return map
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citas, weekStart.getTime()])
+
+  const rangeLabel = `${days[0].toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  const today = new Date()
+
+  return (
+    <div>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+        <button onClick={onPrev} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <ChevronLeft size={16} />
+        </button>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-800 capitalize">{rangeLabel}</span>
+          <button onClick={onToday} className="text-xs font-medium text-blue-600 hover:underline">Hoy</button>
+        </div>
+        <button onClick={onNext} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+
+      <div className="grid grid-cols-7 divide-x divide-gray-100">
+        {days.map((d, i) => {
+          const isToday = d.toDateString() === today.toDateString()
+          const dayCitas = citasByDay[d.toDateString()] ?? []
+          return (
+            <div key={i} className="min-h-[220px]">
+              <div className={cn('text-center py-2 border-b border-gray-100', isToday && 'bg-blue-50')}>
+                <p className="text-xs font-semibold text-gray-400 uppercase">{DIAS_CORTOS[i]}</p>
+                <span className={cn(
+                  'inline-flex items-center justify-center w-6 h-6 text-xs font-medium rounded-full mt-0.5',
+                  isToday ? 'bg-blue-600 text-white' : 'text-gray-700'
+                )}>
+                  {d.getDate()}
+                </span>
+              </div>
+              <div className="p-1.5 space-y-1">
+                {dayCitas.length === 0 ? (
+                  <p className="text-center text-xs text-gray-300 mt-2">—</p>
+                ) : dayCitas.map(c => (
+                  <button
+                    key={c.id}
+                    onClick={() => onEdit(c)}
+                    className={cn('w-full text-left px-1.5 py-1 rounded text-xs', estadoStyle[c.estado])}
+                  >
+                    <p className="font-semibold">
+                      {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                    </p>
+                    <p className="truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ─── calendar view ───────────────────────────────────────────────────────────
 
 function CalendarView({
@@ -639,7 +775,7 @@ function CalendarView({
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function Citas() {
-  const { citas, pacientes, doctores, tratamientos } = useLoaderData<typeof loader>()
+  const { citas, pacientes, doctores, tratamientos, horario } = useLoaderData<typeof loader>()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const view = searchParams.get('view') ?? 'tabla'
@@ -655,6 +791,9 @@ export default function Citas() {
     return today.getMonth()
   })
 
+  const [weekStart, setWeekStart] = useState(() =>
+    new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay()))
+
   const [estadoFilter, setEstadoFilter] = useState('todos')
   const [detalle, setDetalle] = useState<Cita | null>(null)
   const [modal, setModal] = useState<{ open: boolean; cita: Cita | null }>({ open: false, cita: null })
@@ -663,6 +802,37 @@ export default function Citas() {
     if (estadoFilter === 'todos') return citas
     return citas.filter(c => c.estado === estadoFilter)
   }, [citas, estadoFilter])
+
+  const statsSemana = useMemo(() => {
+    const inicioSemana = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay())
+    const finSemana = new Date(inicioSemana.getFullYear(), inicioSemana.getMonth(), inicioSemana.getDate() + 7)
+    const citasSemana = citas.filter(c => {
+      const d = new Date(c.fecha_hora)
+      return d >= inicioSemana && d < finSemana
+    })
+    const confirmadas = citasSemana.filter(c => c.estado === 'confirmada').length
+    const concluidas = citasSemana.filter(c => c.estado === 'completada' || c.estado === 'cancelada')
+    const completadas = concluidas.filter(c => c.estado === 'completada').length
+    return {
+      total: citasSemana.length,
+      confirmadas,
+      tasaAsistencia: concluidas.length > 0 ? Math.round((completadas / concluidas.length) * 100) : null,
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citas])
+
+  const citasHoy = useMemo(() =>
+    citas
+      .filter(c => {
+        const d = new Date(c.fecha_hora)
+        return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
+      })
+      .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [citas]
+  )
+
+  const fmtHoy = today.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })
 
   function setView(v: string) {
     setSearchParams(prev => { prev.set('view', v); return prev }, { replace: true })
@@ -682,6 +852,19 @@ export default function Citas() {
     })
   }
 
+  function prevWeek() {
+    setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() - 7))
+  }
+
+  function nextWeek() {
+    setWeekStart(w => new Date(w.getFullYear(), w.getMonth(), w.getDate() + 7))
+  }
+
+  function todayWeek() {
+    const t = new Date()
+    setWeekStart(new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay()))
+  }
+
   return (
     <div className="p-4 md:p-8">
       {/* header */}
@@ -697,64 +880,151 @@ export default function Citas() {
         </button>
       </div>
 
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        {/* estado filter — scrollable on mobile */}
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto max-w-full">
-          {['todos', ...ESTADOS].map(e => (
-            <button
-              key={e}
-              onClick={() => setEstadoFilter(e)}
-              className={cn(
-                'px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize whitespace-nowrap flex-shrink-0',
-                estadoFilter === e ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-              )}
-            >
-              {e}
-            </button>
-          ))}
+      {/* weekly stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 md:mb-6">
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <Calendar size={13} /> Citas esta semana
+          </div>
+          <p className="text-2xl font-bold text-gray-900">{statsSemana.total}</p>
         </div>
 
-        <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
-          <button
-            onClick={() => setView('tabla')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
-              view === 'tabla' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            )}
-          >
-            <List size={13} /> Tabla
-          </button>
-          <button
-            onClick={() => setView('calendario')}
-            className={cn(
-              'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
-              view === 'calendario' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
-            )}
-          >
-            <Calendar size={13} /> Cal
-          </button>
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <UserCheck size={13} /> Confirmadas
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {statsSemana.confirmadas} <span className="text-sm font-medium text-gray-400">/ {statsSemana.total}</span>
+          </p>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+            <div className="h-1.5 rounded-full bg-blue-500 transition-all"
+              style={{ width: `${statsSemana.total > 0 ? (statsSemana.confirmadas / statsSemana.total) * 100 : 0}%` }} />
+          </div>
+        </div>
+
+        <div className="bg-white rounded-2xl border border-gray-200 p-4">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+            <TrendingUp size={13} /> Tasa de asistencia
+          </div>
+          <p className="text-2xl font-bold text-gray-900">
+            {statsSemana.tasaAsistencia === null ? '—' : `${statsSemana.tasaAsistencia}%`}
+          </p>
+          <div className="w-full bg-gray-100 rounded-full h-1.5 mt-2">
+            <div className="h-1.5 rounded-full bg-green-500 transition-all"
+              style={{ width: `${statsSemana.tasaAsistencia ?? 0}%` }} />
+          </div>
         </div>
       </div>
 
-      {/* content */}
-      <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-        {view === 'tabla' ? (
-          <TablaView
-            citas={filteredCitas}
-            onDetalle={c => setDetalle(c)}
-            onEdit={c => setModal({ open: true, cita: c })}
-          />
-        ) : (
-          <CalendarView
-            citas={filteredCitas}
-            year={calYear}
-            month={calMonth}
-            onEdit={c => setDetalle(c)}
-            onPrev={prevMonth}
-            onNext={nextMonth}
-          />
-        )}
+      <div className="flex flex-col lg:flex-row gap-4">
+        <div className="flex-1 min-w-0">
+          {/* toolbar */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
+            {/* estado filter — scrollable on mobile */}
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1 overflow-x-auto max-w-full">
+              {['todos', ...ESTADOS].map(e => (
+                <button
+                  key={e}
+                  onClick={() => setEstadoFilter(e)}
+                  className={cn(
+                    'px-2.5 py-1 text-xs font-medium rounded-md transition-colors capitalize whitespace-nowrap flex-shrink-0',
+                    estadoFilter === e ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  )}
+                >
+                  {e}
+                </button>
+              ))}
+            </div>
+
+            <div className="ml-auto flex gap-1 bg-gray-100 rounded-lg p-1 flex-shrink-0">
+              <button
+                onClick={() => setView('tabla')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'tabla' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <List size={13} /> Tabla
+              </button>
+              <button
+                onClick={() => setView('semana')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'semana' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Calendar size={13} /> Semana
+              </button>
+              <button
+                onClick={() => setView('calendario')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-md transition-colors',
+                  view === 'calendario' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                )}
+              >
+                <Calendar size={13} /> Mes
+              </button>
+            </div>
+          </div>
+
+          {/* content */}
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+            {view === 'tabla' ? (
+              <TablaView
+                citas={filteredCitas}
+                onDetalle={c => setDetalle(c)}
+                onEdit={c => setModal({ open: true, cita: c })}
+              />
+            ) : view === 'semana' ? (
+              <WeekView
+                citas={filteredCitas}
+                weekStart={weekStart}
+                onEdit={c => setDetalle(c)}
+                onPrev={prevWeek}
+                onNext={nextWeek}
+                onToday={todayWeek}
+              />
+            ) : (
+              <CalendarView
+                citas={filteredCitas}
+                year={calYear}
+                month={calMonth}
+                onEdit={c => setDetalle(c)}
+                onPrev={prevMonth}
+                onNext={nextMonth}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* daily summary panel */}
+        <div className="lg:w-80 flex-shrink-0">
+          <div className="bg-white rounded-2xl border border-gray-200 p-4 lg:sticky lg:top-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Resumen del día</p>
+            <p className="text-sm font-semibold text-gray-900 mb-3 capitalize">{fmtHoy}</p>
+            {citasHoy.length === 0 ? (
+              <p className="text-sm text-gray-400">Sin citas para hoy.</p>
+            ) : (
+              <div className="space-y-3">
+                {citasHoy.map(c => (
+                  <div key={c.id} className="flex items-start justify-between gap-2 pb-3 border-b border-gray-100 last:border-0 last:pb-0">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Clock size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-900">
+                          {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                        <p className="text-xs text-gray-500 truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                        <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
+                      </div>
+                    </div>
+                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0', estadoStyle[c.estado])}>{c.estado}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* detail modal */}
@@ -776,6 +1046,7 @@ export default function Citas() {
           pacientes={pacientes}
           doctores={doctores}
           tratamientos={tratamientos}
+          horario={horario}
           onClose={() => setModal({ open: false, cita: null })}
         />
       )}

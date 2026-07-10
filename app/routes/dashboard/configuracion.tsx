@@ -4,6 +4,7 @@ import type { Route } from './+types/configuracion'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
 import { getClinicaId } from '~/lib/clinica.server'
+import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import {
@@ -52,7 +53,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     ])
 
   const defaultConfig: Config = {
-    agenda_hora_inicio: '08:00', agenda_hora_fin: '18:00',
+    agenda_hora_inicio: HORARIO_DEFAULT.inicio, agenda_hora_fin: HORARIO_DEFAULT.fin,
     agenda_duracion_default_min: 30, agenda_dias_laborables: [1, 2, 3, 4, 5],
     agenda_citas_simultaneas: false, caja_moneda: 'DOP',
     caja_itbis: false, caja_auto_ingreso: false, notif_lab_alerta_dias: 2,
@@ -181,8 +182,8 @@ export async function action({ request }: Route.ActionArgs) {
     const diasRaw = fd.get('agenda_dias_laborables') as string
     const dias = diasRaw ? diasRaw.split(',').map(Number).filter(n => !isNaN(n)) : [1, 2, 3, 4, 5]
     const { error } = await supabase.from('config_clinica').update({
-      agenda_hora_inicio: fd.get('agenda_hora_inicio') || '08:00',
-      agenda_hora_fin: fd.get('agenda_hora_fin') || '18:00',
+      agenda_hora_inicio: fd.get('agenda_hora_inicio') || HORARIO_DEFAULT.inicio,
+      agenda_hora_fin: fd.get('agenda_hora_fin') || HORARIO_DEFAULT.fin,
       agenda_duracion_default_min: parseInt(fd.get('agenda_duracion_default_min') as string) || 30,
       agenda_dias_laborables: dias,
       agenda_citas_simultaneas: fd.get('agenda_citas_simultaneas') === 'true',

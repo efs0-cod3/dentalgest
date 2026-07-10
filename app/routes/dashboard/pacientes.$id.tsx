@@ -5,6 +5,7 @@ import type { action as citasAction } from './citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { buildPacienteData } from '~/lib/pacientes.server'
+import { getHorarioAgenda } from '~/lib/agenda.server'
 import {
   ChevronLeft, Pencil, Trash2, Plus, Phone, Mail, FileText, Upload,
   AlertCircle, Heart, Clock, Calendar, Save, CheckCircle,
@@ -77,7 +78,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const clinicaId = await getClinicaId(request)
   const pacienteId = params.id as string
 
-  const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }] = await Promise.all([
+  const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }, horario] = await Promise.all([
     supabase.from('pacientes').select(`
       id, nombre, telefono, email, created_at,
       fecha_nacimiento, cedula, genero, direccion,
@@ -91,6 +92,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
     supabase.from('odontogramas').select('id, datos, notas, created_at')
       .eq('paciente_id', pacienteId).eq('clinica_id', clinicaId).order('created_at', { ascending: false }),
+    getHorarioAgenda(supabase, clinicaId),
   ])
 
   if (!data) throw redirect('/dashboard/pacientes')
@@ -108,6 +110,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   return {
     paciente, doctores: (doctores ?? []) as Doctor[], tratamientos: (tratamientos ?? []) as Tratamiento[],
     odontogramas: (odontogramas ?? []) as OdontogramaVersion[],
+    horario,
   }
 }
 
@@ -200,8 +203,8 @@ export async function action({ request, params }: Route.ActionArgs) {
 
 // ─── quick cita card ────────────────────────────────────────────────────────
 
-function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
-  pacienteId: string; doctores: Doctor[]; tratamientos: Tratamiento[]
+function QuickCitaCard({ pacienteId, doctores, tratamientos, horario }: {
+  pacienteId: string; doctores: Doctor[]; tratamientos: Tratamiento[]; horario: { inicio: string; fin: string }
 }) {
   const fetcher = useFetcher<typeof citasAction>()
   const [open, setOpen] = useState(false)
@@ -245,7 +248,7 @@ function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
           <div className="grid grid-cols-2 gap-2">
             <input type="date" required value={fechaDate} onChange={e => setFechaDate(e.target.value)}
               className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            <input type="time" required value={fechaTime} onChange={e => setFechaTime(e.target.value)}
+            <input type="time" required min={horario.inicio} max={horario.fin} value={fechaTime} onChange={e => setFechaTime(e.target.value)}
               className="px-2.5 py-1.5 border border-gray-200 rounded-lg text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <select name="tratamiento_id" defaultValue=""
@@ -258,6 +261,9 @@ function QuickCitaCard({ pacienteId, doctores, tratamientos }: {
             <option value="">— Sin doctor —</option>
             {doctores.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
           </select>
+          {fetcher.data?.ok === false && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-2 py-1.5">{fetcher.data.error}</p>
+          )}
           <button type="submit" disabled={isSubmitting}
             className="w-full py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
             {isSubmitting ? 'Agendando…' : 'Agendar'}
@@ -591,7 +597,7 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function PacienteDetalle() {
-  const { paciente, doctores, tratamientos, odontogramas } = useLoaderData<typeof loader>()
+  const { paciente, doctores, tratamientos, odontogramas, horario } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const submit = useSubmit()
   const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'documentos' | 'odontograma'>('datos')
@@ -781,7 +787,7 @@ export default function PacienteDetalle() {
         </div>
 
         <div className="space-y-4">
-          <QuickCitaCard pacienteId={paciente.id} doctores={doctores} tratamientos={tratamientos} />
+          <QuickCitaCard pacienteId={paciente.id} doctores={doctores} tratamientos={tratamientos} horario={horario} />
 
           <div className="bg-white rounded-2xl border border-gray-200 p-4">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-3">Próximas citas</p>
