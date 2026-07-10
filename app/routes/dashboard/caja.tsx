@@ -1,6 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { Form, useLoaderData, useNavigation, useFetcher, useSubmit } from "react-router";
+import { Form, useLoaderData, useNavigation, useFetcher, useSubmit, useActionData } from "react-router";
 import type { Route } from "./+types/caja";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
 import { getClinicaId } from "~/lib/clinica.server";
@@ -246,8 +246,18 @@ export async function action({ request }: Route.ActionArgs) {
     tratamiento_id: (fd.get("tratamiento_id") as string) || null,
     deuda_id: (fd.get("deuda_id") as string) || null,
   };
-  if (intent === "create") await supabase.from("pagos").insert(data);
-  else if (intent === "update")
+  if (intent === "create") {
+    const { data: created, error } = await supabase
+      .from("pagos")
+      .insert(data)
+      .select(
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+      )
+      .single();
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, intent: "create", pago: created as unknown as Pago };
+  }
+  if (intent === "update")
     await supabase
       .from("pagos")
       .update(data)
@@ -893,14 +903,17 @@ function PagoEditModal({
   citas,
   tratamientos,
   onClose,
+  onCreated,
 }: {
   pago: Pago | null;
   pacientes: Paciente[];
   citas: Cita[];
   tratamientos: Tratamiento[];
   onClose: () => void;
+  onCreated: (pago: Pago) => void;
 }) {
   const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
   const isSubmitting = navigation.state === "submitting";
 
   const initialTrat = pago?.tratamiento_id
@@ -911,7 +924,20 @@ function PagoEditModal({
   const [monto, setMonto] = useState(pago ? String(pago.monto) : "");
   const [concepto, setConcepto] = useState(pago?.concepto ?? "");
 
-  useCloseOnSubmit(onClose);
+  // on a fresh "create" (not edit), jump straight to the receipt instead of
+  // just closing — no need to hunt the new entry down in the table afterward
+  const wasSubmitting = useRef(false);
+  useEffect(() => {
+    if (navigation.state === "submitting") wasSubmitting.current = true;
+    else if (navigation.state === "idle" && wasSubmitting.current) {
+      wasSubmitting.current = false;
+      if (!pago && actionData?.ok && "pago" in actionData && actionData.pago) {
+        onCreated(actionData.pago);
+      } else {
+        onClose();
+      }
+    }
+  }, [navigation.state]);
 
   function handleTratsChange(items: Tratamiento[]) {
     setSelectedTrats(items);
@@ -1087,6 +1113,12 @@ function PagoEditModal({
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+
+          {actionData?.ok === false && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              {actionData.error}
+            </p>
+          )}
 
           <div className="flex justify-end gap-2 pt-2">
             <button
@@ -1774,6 +1806,10 @@ export default function Caja() {
           citas={citas}
           tratamientos={tratamientos}
           onClose={() => setEditModal({ open: false, pago: null })}
+          onCreated={(pago) => {
+            setEditModal({ open: false, pago: null });
+            setReciboModal(pago);
+          }}
         />
       )}
       {nuevaDeudaOpen && (
