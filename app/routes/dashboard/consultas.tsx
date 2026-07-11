@@ -6,7 +6,7 @@ import { getClinicaId } from '~/lib/clinica.server'
 import {
   Plus, X, Pencil, Trash2, Search, Eye, Download, Stethoscope, Calendar,
 } from 'lucide-react'
-import { cn } from '~/lib/utils'
+import { cn, calcularEdad } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -29,17 +29,8 @@ const tipoStyle: Record<string, string> = {
 }
 
 function initials(n: string) { return n.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase() }
-function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' }) }
-function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) }
-
-function calcularEdad(fechaNacimientoISO: string) {
-  const hoy = new Date()
-  const nac = new Date(fechaNacimientoISO)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const aunNoCumple = hoy.getMonth() < nac.getMonth() || (hoy.getMonth() === nac.getMonth() && hoy.getDate() < nac.getDate())
-  if (aunNoCumple) edad--
-  return edad
-}
+function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-DO', { dateStyle: 'medium' }) }
+function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }) }
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Consultas — Nin Dental Clinic' }]
@@ -76,7 +67,8 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get('intent') as string
 
   if (intent === 'delete') {
-    await supabase.from('expediente_entradas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('expediente_entradas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 

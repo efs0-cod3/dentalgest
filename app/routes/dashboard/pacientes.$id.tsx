@@ -10,7 +10,7 @@ import {
   ChevronLeft, Pencil, Trash2, Plus, Phone, Mail, FileText, Upload,
   AlertCircle, Heart, Clock, Calendar, Save, CheckCircle,
 } from 'lucide-react'
-import { cn, drLocalToUTC } from '~/lib/utils'
+import { cn, drLocalToUTC, calcularEdad } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { PacienteEditModal } from '~/components/PacienteEditModal'
@@ -44,6 +44,10 @@ type OdontogramaVersion = { id: string; datos: OdontogramaData; notas: string | 
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
+const MAX_DOCUMENTO_MB = 10
+const MAX_DOCUMENTO_BYTES = MAX_DOCUMENTO_MB * 1024 * 1024
+const DOCUMENTO_TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+
 const estadoStyle: Record<string, string> = {
   pendiente: 'bg-yellow-100 text-yellow-700', confirmada: 'bg-blue-100 text-blue-700',
   completada: 'bg-green-100 text-green-700', cancelada: 'bg-gray-100 text-gray-500',
@@ -54,18 +58,9 @@ const tipoEntradaStyle: Record<string, string> = {
 }
 
 function initials(n: string) { return n.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase() }
-function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-MX', { dateStyle: 'medium' }) }
-function fmtDateShort(iso: string) { return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short' }) }
-function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }) }
-
-function calcularEdad(fechaNacimientoISO: string) {
-  const hoy = new Date()
-  const nac = new Date(fechaNacimientoISO)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const aunNoCumple = hoy.getMonth() < nac.getMonth() || (hoy.getMonth() === nac.getMonth() && hoy.getDate() < nac.getDate())
-  if (aunNoCumple) edad--
-  return edad
-}
+function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-DO', { dateStyle: 'medium' }) }
+function fmtDateShort(iso: string) { return new Date(iso).toLocaleDateString('es-DO', { day: 'numeric', month: 'short' }) }
+function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }) }
 
 export function meta({ data }: Route.MetaArgs) {
   return [{ title: `${data?.paciente?.nombre ?? 'Paciente'} — Nin Dental Clinic` }]
@@ -124,22 +119,27 @@ export async function action({ request, params }: Route.ActionArgs) {
   const intent = fd.get('intent') as string
 
   if (intent === 'delete') {
-    await supabase.from('pacientes').delete().eq('id', pacienteId).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('pacientes').delete().eq('id', pacienteId).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return redirect('/dashboard/pacientes')
   }
 
   if (intent === 'update') {
-    await supabase.from('pacientes').update(buildPacienteData(fd, clinicaId)).eq('id', pacienteId).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('pacientes').update(buildPacienteData(fd, clinicaId)).eq('id', pacienteId).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
   if (intent === 'delete-entrada') {
-    await supabase.from('expediente_entradas').delete().eq('id', fd.get('id') as string)
+    const { error } = await supabase.from('expediente_entradas').delete()
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
   if (intent === 'create-entrada') {
-    await supabase.from('expediente_entradas').insert({
+    const { error } = await supabase.from('expediente_entradas').insert({
       clinica_id: clinicaId,
       paciente_id: pacienteId,
       doctor_id: (fd.get('doctor_id') as string) || null,
@@ -148,26 +148,32 @@ export async function action({ request, params }: Route.ActionArgs) {
       titulo: fd.get('titulo') as string,
       descripcion: (fd.get('descripcion') as string) || null,
     })
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
   if (intent === 'upload-documento') {
     const archivo = fd.get('archivo') as File
-    if (archivo && archivo.size > 0) {
-      const ext = archivo.name.split('.').pop()
-      const path = `${clinicaId}/${pacienteId}/${Date.now()}.${ext}`
-      const bytes = await archivo.arrayBuffer()
-      const { error } = await supabase.storage.from('documentos').upload(path, bytes, { contentType: archivo.type })
-      if (!error) {
-        const { data: { publicUrl } } = supabase.storage.from('documentos').getPublicUrl(path)
-        await supabase.from('documentos').insert({
-          clinica_id: clinicaId, paciente_id: pacienteId,
-          nombre: (fd.get('nombre') as string) || archivo.name,
-          tipo: fd.get('tipo') as string,
-          url: publicUrl, storage_path: path,
-        })
-      }
+    if (!archivo || archivo.size === 0) return { ok: false, error: 'Selecciona un archivo.' }
+    if (archivo.size > MAX_DOCUMENTO_BYTES) {
+      return { ok: false, error: `El archivo pesa más de ${MAX_DOCUMENTO_MB} MB. Reduce su tamaño e intenta de nuevo.` }
     }
+    if (!DOCUMENTO_TIPOS_PERMITIDOS.includes(archivo.type)) {
+      return { ok: false, error: 'Tipo de archivo no permitido. Sube una imagen (JPG, PNG, WebP) o un PDF.' }
+    }
+    const ext = archivo.name.split('.').pop()
+    const path = `${clinicaId}/${pacienteId}/${Date.now()}.${ext}`
+    const bytes = await archivo.arrayBuffer()
+    const { error } = await supabase.storage.from('documentos').upload(path, bytes, { contentType: archivo.type })
+    if (error) return { ok: false, error: error.message }
+    const { data: { publicUrl } } = supabase.storage.from('documentos').getPublicUrl(path)
+    const { error: docError } = await supabase.from('documentos').insert({
+      clinica_id: clinicaId, paciente_id: pacienteId,
+      nombre: (fd.get('nombre') as string) || archivo.name,
+      tipo: fd.get('tipo') as string,
+      url: publicUrl, storage_path: path,
+    })
+    if (docError) return { ok: false, error: docError.message }
     return { ok: true }
   }
 
@@ -194,7 +200,10 @@ export async function action({ request, params }: Route.ActionArgs) {
   if (intent === 'delete-documento') {
     const path = fd.get('storage_path') as string
     await supabase.storage.from('documentos').remove([path])
-    await supabase.from('documentos').delete().eq('id', fd.get('id') as string)
+    const { error } = await supabase.from('documentos').delete()
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
@@ -521,7 +530,7 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
             <label className="block text-xs font-medium text-gray-600 mb-1">Archivo</label>
-            <input type="file" name="archivo" accept="image/*,.pdf,.doc,.docx"
+            <input type="file" name="archivo" accept="image/jpeg,image/png,image/webp,.pdf"
               className="w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
           </div>
           <div>

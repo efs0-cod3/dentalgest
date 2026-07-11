@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
-import { cn } from '~/lib/utils'
+import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
@@ -108,8 +108,8 @@ export async function action({ request }: Route.ActionArgs) {
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
   if (intent === 'delete_doctor') {
-    await supabase.from('doctores').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
-    return { ok: true, intent }
+    const { error } = await supabase.from('doctores').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
   // Tratamientos
@@ -133,8 +133,8 @@ export async function action({ request }: Route.ActionArgs) {
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
   if (intent === 'delete_tratamiento') {
-    await supabase.from('tratamientos').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
-    return { ok: true, intent }
+    const { error } = await supabase.from('tratamientos').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
   // Usuarios
@@ -147,10 +147,11 @@ export async function action({ request }: Route.ActionArgs) {
         data: { clinica_id: clinicaId },
       })
       if (inviteErr) return { ok: false, error: inviteErr.message, intent }
-      await supabase.from('perfiles').upsert(
+      const { error: perfilErr } = await supabase.from('perfiles').upsert(
         { id: invited.user.id, clinica_id: clinicaId, rol, email: emailInvite },
         { onConflict: 'id' }
       )
+      if (perfilErr) return { ok: false, error: perfilErr.message, intent }
       return { ok: true, intent }
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : 'Error al invitar', intent }
@@ -163,9 +164,9 @@ export async function action({ request }: Route.ActionArgs) {
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
   if (intent === 'remove_user') {
-    await supabase.from('perfiles').delete()
+    const { error } = await supabase.from('perfiles').delete()
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
-    return { ok: true, intent }
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
   // Config helpers
@@ -592,7 +593,7 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
                 <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: t.color }} />
                 <p className="flex-1 text-sm font-medium text-gray-900">{t.nombre}</p>
                 <p className="w-28 text-sm text-gray-600 text-right">
-                  {new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(t.precio)}
+                  {fmtMoney(t.precio)}
                 </p>
                 <p className="w-20 text-sm text-gray-500 text-right">{t.duracion_min} min</p>
                 <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity w-14 justify-end">
@@ -646,7 +647,7 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
         <ConfirmDeleteModal
           title="Eliminar tratamiento"
           itemLabel={deleteTarget.nombre}
-          description={`${new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(deleteTarget.precio)} · ${deleteTarget.duracion_min} min. Esta acción no se puede deshacer.`}
+          description={`${fmtMoney(deleteTarget.precio)} · ${deleteTarget.duracion_min} min. Esta acción no se puede deshacer.`}
           isSubmitting={f.state !== 'idle'}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => {
@@ -776,12 +777,8 @@ function CajaSection({ config }: { config: Config }) {
 
         <div>
           <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Moneda</label>
-          <select name="caja_moneda" defaultValue={config.caja_moneda} className={inputCls}>
-            <option value="DOP">DOP — Peso dominicano</option>
-            <option value="USD">USD — Dólar americano</option>
-            <option value="EUR">EUR — Euro</option>
-            <option value="MXN">MXN — Peso mexicano</option>
-          </select>
+          <p className="text-sm text-gray-900">DOP — Peso dominicano</p>
+          <p className="text-xs text-gray-400 mt-0.5">Todos los montos de la app se muestran en pesos dominicanos.</p>
         </div>
 
         <div className="border-t border-gray-100 pt-1 divide-y divide-gray-100">

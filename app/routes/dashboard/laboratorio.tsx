@@ -8,7 +8,7 @@ import {
   Plus, X, Pencil, Trash2, Clock, CheckCircle, Package,
   AlertTriangle, FlaskConical, Calendar, Printer,
 } from "lucide-react";
-import { cn } from "~/lib/utils";
+import { cn, fmtMoney } from "~/lib/utils";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -39,11 +39,9 @@ type Paciente = { id: string; nombre: string };
 // ─── utils ────────────────────────────────────────────────────────────────────
 
 function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString("es-MX", { dateStyle: "medium" });
+  return new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { dateStyle: "medium" });
 }
-function fmtMXN(n: number) {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
-}
+const fmtMXN = fmtMoney;
 function isPastDue(orden: OrdenLaboratorio): boolean {
   if (orden.estado === "entregado") return false;
   if (!orden.fecha_prometida) return false;
@@ -69,7 +67,7 @@ function esc(s: string) {
 
 function buildOrdenHtml(orden: OrdenLaboratorio): string {
   const folio = orden.id.slice(-8).toUpperCase();
-  const today = new Date().toLocaleDateString("es-MX", { dateStyle: "long" });
+  const today = new Date().toLocaleDateString("es-DO", { dateStyle: "long" });
 
   function row(label: string, value: string | null | undefined, highlight = false) {
     if (!value) return "";
@@ -186,11 +184,12 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get("intent") as string;
 
   if (intent === "delete") {
-    await supabase
+    const { error } = await supabase
       .from("ordenes_laboratorio")
       .delete()
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
@@ -200,11 +199,12 @@ export async function action({ request }: Route.ActionArgs) {
     if (nuevoEstado === "entregado") {
       updates.fecha_entrega = new Date().toISOString().slice(0, 10);
     }
-    await supabase
+    const { error } = await supabase
       .from("ordenes_laboratorio")
       .update(updates)
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
