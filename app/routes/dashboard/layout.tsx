@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { redirect, Outlet, NavLink, Form } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope } from 'lucide-react'
+import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '~/lib/utils'
+
+const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed'
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
@@ -32,12 +34,28 @@ const nav = [
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(false)
 
-  const sidebarContent = (onNav?: () => void) => (
+  // restore preference after mount to avoid a server/client hydration mismatch
+  // (localStorage isn't available during SSR)
+  useEffect(() => {
+    if (localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === 'true') setCollapsed(true)
+  }, [])
+
+  function toggleCollapsed() {
+    setCollapsed(c => {
+      localStorage.setItem(SIDEBAR_COLLAPSED_KEY, String(!c))
+      return !c
+    })
+  }
+
+  const sidebarContent = (onNav?: () => void, collapsedNav = false) => (
     <>
-      <div className="px-6 py-5 border-b border-gray-100 flex flex-col items-center gap-1.5">
-        <img src="/ninlogo.png" alt="Logo" style={{ maxWidth: '70%' }} />
-        <span className="font-bold text-gray-900 text-sm text-center">{loaderData.clinicaNombre}</span>
+      <div className={cn('px-6 py-5 border-b border-gray-100 flex flex-col items-center gap-1.5', collapsedNav && 'px-2')}>
+        <img src="/ninlogo.png" alt="Logo" style={{ maxWidth: collapsedNav ? '85%' : '70%' }} />
+        {!collapsedNav && (
+          <span className="font-bold text-gray-900 text-sm text-center">{loaderData.clinicaNombre}</span>
+        )}
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
         {nav.map(({ to, label, icon: Icon, end }) => (
@@ -46,9 +64,11 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             to={to}
             end={end}
             onClick={onNav}
+            title={collapsedNav ? label : undefined}
             className={({ isActive }) =>
               cn(
                 'flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                collapsedNav && 'justify-center px-0',
                 isActive
                   ? 'bg-blue-50 text-blue-700'
                   : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
@@ -56,19 +76,25 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
             }
           >
             <Icon size={16} />
-            {label}
+            {!collapsedNav && label}
           </NavLink>
         ))}
       </nav>
       <div className="px-3 py-4 border-t border-gray-100">
-        <p className="text-xs text-gray-500 px-3 mb-2 truncate">{loaderData.user.email}</p>
+        {!collapsedNav && (
+          <p className="text-xs text-gray-500 px-3 mb-2 truncate">{loaderData.user.email}</p>
+        )}
         <Form method="post" action="/logout">
           <button
             type="submit"
-            className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors"
+            title={collapsedNav ? 'Cerrar sesión' : undefined}
+            className={cn(
+              'flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors',
+              collapsedNav && 'justify-center px-0'
+            )}
           >
             <LogOut size={16} />
-            Cerrar sesión
+            {!collapsedNav && 'Cerrar sesión'}
           </button>
         </Form>
       </div>
@@ -78,8 +104,18 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   return (
     <div className="flex h-screen bg-gray-50">
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-56 flex-shrink-0 bg-white border-r border-gray-200 flex-col">
-        {sidebarContent()}
+      <aside className={cn(
+        'hidden md:flex flex-shrink-0 bg-white border-r border-gray-200 flex-col relative transition-[width] duration-200',
+        collapsed ? 'w-16' : 'w-56'
+      )}>
+        {sidebarContent(undefined, collapsed)}
+        <button
+          onClick={toggleCollapsed}
+          title={collapsed ? 'Expandir menú' : 'Colapsar menú'}
+          className="hidden md:flex items-center justify-center absolute top-6 -right-3 w-6 h-6 bg-white border border-gray-200 rounded-full text-gray-400 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
+        >
+          {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
+        </button>
       </aside>
 
       {/* Mobile drawer overlay */}

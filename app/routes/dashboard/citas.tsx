@@ -558,16 +558,15 @@ function TablaView({
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
-            <col className="w-[17%]" />
-            <col className="w-[20%]" />
-            <col className="w-[17%]" />
-            <col className="w-[20%]" />
+            <col className="w-[14%]" />
+            <col className="w-[19%]" />
             <col className="w-[16%]" />
-            <col className="w-[10%]" />
+            <col className="w-[21%]" />
+            <col className="w-[30%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-gray-200">
-              {['Fecha y hora', 'Paciente', 'Doctor', 'Tratamiento', 'Estado', ''].map(h => (
+              {['Fecha y hora', 'Paciente', 'Doctor', 'Tratamiento', 'Estado'].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -594,11 +593,9 @@ function TablaView({
                 <td className="px-4 py-3 text-gray-700 align-top">
                   <p className="truncate" title={c.tratamientos?.nombre ?? undefined}>{c.tratamientos?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 align-top">
-                  <EstadoSelect cita={c} />
-                </td>
                 <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-2">
+                    <EstadoSelect cita={c} />
                     <button
                       onClick={() => onEdit(c)}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
