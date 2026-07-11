@@ -91,7 +91,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   const clinicaId = await getClinicaId(request)
   const [{ data: perfilClinica }, { data: clientes }, { data: trabajos }, { data: facturas }] = await Promise.all([
-    supabase.from('clinicas').select('nombre').eq('id', clinicaId).single(),
+    supabase.from('clinicas').select('nombre,rnc').eq('id', clinicaId).single(),
     supabase.from('clientes_externos').select('id,nombre,tipo,telefono,email,direccion,rnc,notas,created_at')
       .eq('clinica_id', clinicaId).order('nombre'),
     supabase.from('trabajos_externos').select(
@@ -110,6 +110,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   })
   return {
     clinicaNombre: perfilClinica?.nombre ?? 'Nin Dental Clinic',
+    clinicaRnc: (perfilClinica?.rnc as string | null) ?? null,
     clientes: (clientes ?? []) as ClienteExterno[],
     trabajos: (trabajos ?? []) as unknown as TrabajoExterno[],
     facturas: facturasConSaldo,
@@ -1056,8 +1057,8 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
 
 // ─── factura detalle modal ──────────────────────────────────────────────────────
 
-function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
-  factura: FacturaExterna; trabajos: TrabajoExterno[]; clinicaNombre: string; onClose: () => void
+function FacturaDetalleModal({ factura, trabajos, clinicaNombre, clinicaRnc, onClose }: {
+  factura: FacturaExterna; trabajos: TrabajoExterno[]; clinicaNombre: string; clinicaRnc: string | null; onClose: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [abonoModal, setAbonoModal] = useState(false)
@@ -1073,7 +1074,7 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
     const QRCode = (await import('qrcode')).default
     const qrUrl = `${window.location.origin}/verificar-factura/${factura.id}?token=${factura.verification_token}`
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 120, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
-    w.document.write(buildFacturaExternaHtml(factura, trabajosFactura, qrDataUrl, clinicaNombre))
+    w.document.write(buildFacturaExternaHtml(factura, trabajosFactura, qrDataUrl, clinicaNombre, clinicaRnc))
     w.document.close()
     w.focus()
   }
@@ -1163,7 +1164,7 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, onClose }: {
 type TabId = 'trabajos' | 'clientes' | 'facturas'
 
 export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
-  const { clinicaNombre, clientes, trabajos, facturas } = loaderData
+  const { clinicaNombre, clinicaRnc, clientes, trabajos, facturas } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'trabajos') as TabId
   function setTab(t: TabId) { setSearchParams(prev => { prev.set('tab', t); return prev }, { replace: true }) }
@@ -1379,7 +1380,7 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
           onEdit={() => { setClienteModal({ open: true, cliente: clienteDetalle }); setClienteDetalle(null) }} />
       )}
       {facturaDetalle && (
-        <FacturaDetalleModal factura={facturaDetalle} trabajos={trabajos} clinicaNombre={clinicaNombre}
+        <FacturaDetalleModal factura={facturaDetalle} trabajos={trabajos} clinicaNombre={clinicaNombre} clinicaRnc={clinicaRnc}
           onClose={() => setFacturaDetalle(null)} />
       )}
       {generarFacturaCliente && (
