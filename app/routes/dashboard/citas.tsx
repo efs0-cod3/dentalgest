@@ -584,7 +584,7 @@ function TablaView({
                 className="hover:bg-gray-50 transition-colors cursor-pointer"
                 onClick={() => onDetalle(c)}
               >
-                <td className="px-4 py-3 align-top">
+                <td className="px-4 py-3 align-middle">
                   <div
                     className="flex flex-col items-center justify-center w-11 h-11 rounded-full bg-gray-100"
                     title={`${fmtTimeOnly(c.fecha_hora)} · ${c.duracion_min} min`}
@@ -593,16 +593,16 @@ function TablaView({
                     <span className="text-[9px] font-medium uppercase text-gray-400 leading-none mt-1">{fmtMonthAbbr(c.fecha_hora)}</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.pacientes?.nombre ?? undefined}>{c.pacientes?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.doctores?.nombre ?? undefined}>{c.doctores?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.tratamientos?.nombre ?? undefined}>{c.tratamientos?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-3 align-middle" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-2">
                     <EstadoSelect cita={c} />
                     <button
