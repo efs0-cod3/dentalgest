@@ -196,12 +196,16 @@ function fmtDate(iso: string) {
   })
 }
 
-function fmtDateOnly(iso: string) {
-  return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
-}
-
 function fmtTimeOnly(iso: string) {
   return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
+function fmtDayNum(iso: string) {
+  return new Date(iso).getDate()
+}
+
+function fmtMonthAbbr(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { month: 'short' }).replace('.', '')
 }
 
 const DR_OFFSET_MS = -4 * 60 * 60 * 1000 // UTC-4, no DST
@@ -558,16 +562,15 @@ function TablaView({
       <div className="hidden md:block overflow-x-auto">
         <table className="w-full text-sm table-fixed">
           <colgroup>
+            <col className="w-[8%]" />
+            <col className="w-[21%]" />
             <col className="w-[17%]" />
-            <col className="w-[20%]" />
-            <col className="w-[17%]" />
-            <col className="w-[20%]" />
-            <col className="w-[16%]" />
-            <col className="w-[10%]" />
+            <col className="w-[23%]" />
+            <col className="w-[31%]" />
           </colgroup>
           <thead>
             <tr className="border-b border-gray-200">
-              {['Fecha y hora', 'Paciente', 'Doctor', 'Tratamiento', 'Estado', ''].map(h => (
+              {['Fecha', 'Paciente', 'Doctor', 'Tratamiento', 'Estado'].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -581,24 +584,27 @@ function TablaView({
                 className="hover:bg-gray-50 transition-colors cursor-pointer"
                 onClick={() => onDetalle(c)}
               >
-                <td className="px-4 py-3 align-top">
-                  <p className="text-gray-900 truncate">{fmtDateOnly(c.fecha_hora)}</p>
-                  <p className="text-xs text-gray-400 truncate">{fmtTimeOnly(c.fecha_hora)} · {c.duracion_min}m</p>
+                <td className="px-4 py-3 align-middle">
+                  <div
+                    className="flex flex-col items-center justify-center w-11 h-11 rounded-full bg-gray-100"
+                    title={`${fmtTimeOnly(c.fecha_hora)} · ${c.duracion_min} min`}
+                  >
+                    <span className="text-sm font-bold text-gray-900 leading-none">{fmtDayNum(c.fecha_hora)}</span>
+                    <span className="text-[9px] font-medium uppercase text-gray-400 leading-none mt-1">{fmtMonthAbbr(c.fecha_hora)}</span>
+                  </div>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.pacientes?.nombre ?? undefined}>{c.pacientes?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.doctores?.nombre ?? undefined}>{c.doctores?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 text-gray-700 align-top">
+                <td className="px-4 py-3 text-gray-700 align-middle">
                   <p className="truncate" title={c.tratamientos?.nombre ?? undefined}>{c.tratamientos?.nombre ?? '—'}</p>
                 </td>
-                <td className="px-4 py-3 align-top">
-                  <EstadoSelect cita={c} />
-                </td>
-                <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
-                  <div className="flex items-center gap-1">
+                <td className="px-4 py-3 align-middle" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center gap-2">
+                    <EstadoSelect cita={c} />
                     <button
                       onClick={() => onEdit(c)}
                       className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
