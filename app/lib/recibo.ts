@@ -29,7 +29,7 @@ function fmtDOP(n: number) {
   return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(n)
 }
 
-export function buildReciboHtml(pago: ReciboHtmlPago, forEmail = false, deuda?: DeudaRecibo, qrDataUrl?: string, clinicaNombre?: string, clinicaLogoUrl?: string): string {
+export function buildReciboHtml(pago: ReciboHtmlPago, forEmail = false, deuda?: DeudaRecibo, qrDataUrl?: string, clinicaNombre?: string, clinicaLogoUrl?: string, clinicaRnc?: string | null): string {
   const folio = pago.id.slice(-8).toUpperCase()
   const fechaStr = new Date(pago.fecha).toLocaleDateString('es-DO', { dateStyle: 'long' })
   const montoFmt = fmtDOP(pago.monto)
@@ -141,6 +141,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;ba
       ? `<img src="${clinicaLogoUrl}" alt="Logo" style="height:56px;max-width:160px;object-fit:contain;margin:0 auto 10px;display:block;filter:brightness(0) invert(1);" />`
       : `<div style="width:52px;height:52px;background:rgba(255,255,255,.15);border-radius:14px;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;font-size:26px;">🦷</div>`}
     <p style="color:white;font-size:19px;font-weight:700;margin:0 0 3px;">${esc(clinicaNombre ?? 'Nin Dental Clinic')}</p>
+    ${clinicaRnc ? `<p style="color:rgba(255,255,255,.8);font-size:11px;margin:0 0 3px;">RNC: ${esc(clinicaRnc)}</p>` : ''}
     <p style="color:rgba(255,255,255,.75);font-size:12px;margin:0;">Recibo de Pago</p>
   </div>
   ${folioBar}

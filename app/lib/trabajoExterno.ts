@@ -117,7 +117,7 @@ ${printFooterButtons()}
 }
 
 export function buildFacturaExternaHtml(
-  factura: FacturaParaImprimir, trabajos: TrabajoParaImprimir[], qrDataUrl: string, clinicaNombre: string
+  factura: FacturaParaImprimir, trabajos: TrabajoParaImprimir[], qrDataUrl: string, clinicaNombre: string, clinicaRnc?: string | null
 ): string {
   const folio = factura.id.slice(-8).toUpperCase()
   const today = new Date().toLocaleDateString('es-DO', { dateStyle: 'long' })
@@ -147,6 +147,7 @@ export function buildFacturaExternaHtml(
     <div>
       <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;text-transform:uppercase;letter-spacing:.1em;">Factura — trabajos externos</p>
       <p style="color:white;font-size:20px;font-weight:800;margin:0 0 2px;">${esc(clinicaNombre)}</p>
+      ${clinicaRnc ? `<p style="color:rgba(255,255,255,.8);font-size:11px;margin:0 0 2px;">RNC: ${esc(clinicaRnc)}</p>` : ''}
       <p style="color:rgba(255,255,255,.8);font-size:12px;margin:0;font-family:monospace;">Folio #${folio}</p>
     </div>
     <div style="text-align:right;">

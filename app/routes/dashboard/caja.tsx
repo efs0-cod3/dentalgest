@@ -135,7 +135,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       )
       .eq("clinica_id", clinicaId)
       .order("created_at", { ascending: false }),
-    supabase.from("clinicas").select("nombre").eq("id", clinicaId).single(),
+    supabase.from("clinicas").select("nombre,rnc").eq("id", clinicaId).single(),
   ]);
 
   const deudas: Deuda[] = (deudasRaw ?? []).map((d: any) => {
@@ -161,6 +161,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     tratamientos: (tratamientos ?? []) as Tratamiento[],
     deudas,
     clinicaNombre: clinicaData?.nombre ?? 'Nin Dental Clinic',
+    clinicaRnc: (clinicaData?.rnc as string | null) ?? null,
   };
 }
 
@@ -1152,11 +1153,13 @@ function ReciboModal({
   deuda,
   onClose,
   clinicaNombre,
+  clinicaRnc,
 }: {
   pago: Pago;
   deuda?: DeudaRecibo | null;
   onClose: () => void;
   clinicaNombre: string;
+  clinicaRnc: string | null;
 }) {
   const [showEmail, setShowEmail] = useState(false);
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
@@ -1170,7 +1173,7 @@ function ReciboModal({
     const qrUrl = `${window.location.origin}/verificar/${pago.id}${pago.verification_token ? `?token=${pago.verification_token}` : ""}`;
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 176, margin: 1, color: { dark: "#1e293b", light: "#ffffff" } });
     const logoUrl = `${window.location.origin}/ninlogo.png`
-    const html = buildReciboHtml(pago, false, deuda ?? undefined, qrDataUrl, clinicaNombre, logoUrl);
+    const html = buildReciboHtml(pago, false, deuda ?? undefined, qrDataUrl, clinicaNombre, logoUrl, clinicaRnc);
     const w = window.open("", "_blank", "width=520,height=820");
     if (!w) {
       alert("Permite ventanas emergentes para imprimir");
@@ -1386,7 +1389,7 @@ function ReciboModal({
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function Caja() {
-  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre } =
+  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre, clinicaRnc } =
     useLoaderData<typeof loader>();
   const [tipoFilter, setTipoFilter] = useState("todos");
   const [deudaTab, setDeudaTab] = useState<"pendiente" | "liquidada">(
@@ -1800,6 +1803,7 @@ export default function Caja() {
           }
           onClose={() => setReciboModal(null)}
           clinicaNombre={clinicaNombre}
+          clinicaRnc={clinicaRnc}
         />
       )}
       {editModal.open && (
