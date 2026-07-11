@@ -789,8 +789,8 @@ function CajaSection({ config }: { config: Config }) {
             label="Aplicar ITBIS (18%)"
             description="Los servicios médicos en RD están exentos — activa solo si aplica" />
           <Toggle name="caja_auto_ingreso" defaultChecked={config.caja_auto_ingreso}
-            label="Registrar ingreso al marcar cita como atendida"
-            description="Crea automáticamente un pago cuando una cita pasa a estado 'atendida'" />
+            label="Registrar ingreso al marcar cita como completada"
+            description="Crea automáticamente un pago cuando una cita pasa a estado 'completada'" />
         </div>
 
         <div className="flex items-center gap-3 pt-2">

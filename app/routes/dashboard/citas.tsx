@@ -71,11 +71,23 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === 'cambiar_estado') {
+    const citaId = fd.get('id') as string
+    const estado = fd.get('estado') as string
     const { error } = await supabase.from('citas')
-      .update({ estado: fd.get('estado') as string })
-      .eq('id', fd.get('id') as string)
+      .update({ estado })
+      .eq('id', citaId)
       .eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message }
+    if (estado === 'completada') {
+      const { data: cita } = await supabase.from('citas')
+        .select('paciente_id,doctor_id,tratamiento_id,fecha_hora,notas')
+        .eq('id', citaId)
+        .single()
+      if (cita?.paciente_id) {
+        await syncConsultaFromCita(supabase, clinicaId, citaId, cita)
+        await syncDeudaFromCita(supabase, clinicaId, citaId, cita)
+      }
+    }
     return { ok: true }
   }
 
@@ -112,6 +124,7 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (citaId && data.estado === 'completada' && data.paciente_id) {
     await syncConsultaFromCita(supabase, clinicaId, citaId, data)
+    await syncDeudaFromCita(supabase, clinicaId, citaId, data)
   }
 
   return { ok: true }
@@ -149,6 +162,50 @@ async function syncConsultaFromCita(
     tipo: 'tratamiento',
     titulo,
     descripcion: data.notas,
+  })
+}
+
+// si la clínica activó "Registrar ingreso al marcar cita como completada"
+// (config caja_auto_ingreso), crea la deuda en Caja por el precio del
+// tratamiento agendado, para luego cobrarla con abonos como cualquier deuda.
+// No aplica sin paciente o sin tratamiento (no habría monto que cobrar), y
+// no duplica si la cita ya tiene una deuda vinculada (automática o manual).
+async function syncDeudaFromCita(
+  supabase: ReturnType<typeof createSupabaseServerClient>['supabase'],
+  clinicaId: string,
+  citaId: string,
+  data: { paciente_id: FormDataEntryValue | null; tratamiento_id: FormDataEntryValue | null },
+) {
+  if (!data.paciente_id || !data.tratamiento_id) return
+
+  const { data: config } = await supabase
+    .from('config_clinica')
+    .select('caja_auto_ingreso')
+    .eq('clinica_id', clinicaId)
+    .maybeSingle()
+  if (!config?.caja_auto_ingreso) return
+
+  const { data: existing } = await supabase
+    .from('deudas')
+    .select('id')
+    .eq('cita_id', citaId)
+    .maybeSingle()
+  if (existing) return
+
+  const { data: tratamiento } = await supabase
+    .from('tratamientos')
+    .select('nombre,precio')
+    .eq('id', data.tratamiento_id as string)
+    .single()
+  if (!tratamiento || !(Number(tratamiento.precio) > 0)) return
+
+  await supabase.from('deudas').insert({
+    clinica_id: clinicaId,
+    paciente_id: data.paciente_id as string,
+    cita_id: citaId,
+    tratamiento_id: data.tratamiento_id as string,
+    concepto: tratamiento.nombre,
+    monto_total: Number(tratamiento.precio),
   })
 }
 
