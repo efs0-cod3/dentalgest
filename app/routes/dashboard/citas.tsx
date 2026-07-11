@@ -153,6 +153,14 @@ function fmtDate(iso: string) {
   })
 }
 
+function fmtDateOnly(iso: string) {
+  return new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function fmtTimeOnly(iso: string) {
+  return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+}
+
 const DR_OFFSET_MS = -4 * 60 * 60 * 1000 // UTC-4, no DST
 
 function toDatetimeLocal(iso: string) {
@@ -505,10 +513,18 @@ function TablaView({
     <>
       {/* Desktop table */}
       <div className="hidden md:block overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col className="w-[17%]" />
+            <col className="w-[20%]" />
+            <col className="w-[17%]" />
+            <col className="w-[20%]" />
+            <col className="w-[16%]" />
+            <col className="w-[10%]" />
+          </colgroup>
           <thead>
             <tr className="border-b border-gray-200">
-              {['Fecha y hora', 'Paciente', 'Doctor', 'Tratamiento', 'Duración', 'Estado', ''].map(h => (
+              {['Fecha y hora', 'Paciente', 'Doctor', 'Tratamiento', 'Estado', ''].map(h => (
                 <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -522,15 +538,23 @@ function TablaView({
                 className="hover:bg-gray-50 transition-colors cursor-pointer"
                 onClick={() => onDetalle(c)}
               >
-                <td className="px-4 py-3 text-gray-900 whitespace-nowrap">{fmtDate(c.fecha_hora)}</td>
-                <td className="px-4 py-3 text-gray-700">{c.pacientes?.nombre ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-700">{c.doctores?.nombre ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-700">{c.tratamientos?.nombre ?? '—'}</td>
-                <td className="px-4 py-3 text-gray-500">{c.duracion_min} min</td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 align-top">
+                  <p className="text-gray-900 truncate">{fmtDateOnly(c.fecha_hora)}</p>
+                  <p className="text-xs text-gray-400 truncate">{fmtTimeOnly(c.fecha_hora)} · {c.duracion_min}m</p>
+                </td>
+                <td className="px-4 py-3 text-gray-700 align-top">
+                  <p className="truncate" title={c.pacientes?.nombre ?? undefined}>{c.pacientes?.nombre ?? '—'}</p>
+                </td>
+                <td className="px-4 py-3 text-gray-700 align-top">
+                  <p className="truncate" title={c.doctores?.nombre ?? undefined}>{c.doctores?.nombre ?? '—'}</p>
+                </td>
+                <td className="px-4 py-3 text-gray-700 align-top">
+                  <p className="truncate" title={c.tratamientos?.nombre ?? undefined}>{c.tratamientos?.nombre ?? '—'}</p>
+                </td>
+                <td className="px-4 py-3 align-top">
                   <EstadoSelect cita={c} />
                 </td>
-                <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
+                <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => onEdit(c)}
