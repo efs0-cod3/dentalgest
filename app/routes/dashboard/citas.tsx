@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit, useActionData } from 'react-router'
+import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit, useActionData, useFetcher } from 'react-router'
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { getHorarioAgenda } from '~/lib/agenda.server'
-import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
+import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
 import { cn, drLocalToUTC } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -70,6 +70,15 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true }
   }
 
+  if (intent === 'cambiar_estado') {
+    const { error } = await supabase.from('citas')
+      .update({ estado: fd.get('estado') as string })
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
+    return { ok: true }
+  }
+
   const data = {
     clinica_id: clinicaId,
     paciente_id: fd.get('paciente_id') || null,
@@ -109,6 +118,32 @@ const estadoStyle: Record<string, string> = {
   confirmada: 'bg-blue-100 text-blue-700',
   completada: 'bg-green-100 text-green-700',
   cancelada: 'bg-gray-100 text-gray-500 line-through',
+}
+
+// select inline con el mismo look del badge de estado, para confirmar/cambiar
+// una cita sin tener que abrir el modal completo
+function EstadoSelect({ cita, className }: { cita: Cita; className?: string }) {
+  const fetcher = useFetcher()
+  const estado = (fetcher.formData?.get('estado') as string) ?? cita.estado
+
+  return (
+    <div
+      className={cn('relative inline-flex items-center flex-shrink-0 rounded-full', estadoStyle[estado], className)}
+      onClick={e => e.stopPropagation()}
+    >
+      <select
+        value={estado}
+        disabled={fetcher.state !== 'idle'}
+        onChange={e => fetcher.submit({ intent: 'cambiar_estado', id: cita.id, estado: e.target.value }, { method: 'post' })}
+        className="appearance-none bg-transparent border-0 rounded-full pl-2.5 pr-5 py-0.5 text-xs font-medium capitalize cursor-pointer disabled:cursor-wait focus:outline-none focus:ring-2 focus:ring-blue-500"
+      >
+        {ESTADOS.map(e => (
+          <option key={e} value={e} className="text-gray-900 bg-white">{e.charAt(0).toUpperCase() + e.slice(1)}</option>
+        ))}
+      </select>
+      <ChevronDown size={11} className="pointer-events-none absolute right-1.5" />
+    </div>
+  )
 }
 
 function fmtDate(iso: string) {
@@ -158,9 +193,7 @@ function CitaDetalleModal({
         <div className="px-6 py-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-start justify-between">
             <div>
-              <span className={cn('px-2.5 py-1 rounded-full text-xs font-semibold', estadoStyle[cita.estado])}>
-                {cita.estado.charAt(0).toUpperCase() + cita.estado.slice(1)}
-              </span>
+              <EstadoSelect cita={cita} />
               <h2 className="font-semibold text-gray-900 text-lg mt-2 leading-tight">
                 {cita.pacientes?.nombre ?? 'Sin paciente'}
               </h2>
@@ -495,9 +528,7 @@ function TablaView({
                 <td className="px-4 py-3 text-gray-700">{c.tratamientos?.nombre ?? '—'}</td>
                 <td className="px-4 py-3 text-gray-500">{c.duracion_min} min</td>
                 <td className="px-4 py-3">
-                  <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium', estadoStyle[c.estado])}>
-                    {c.estado}
-                  </span>
+                  <EstadoSelect cita={c} />
                 </td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   <div className="flex items-center gap-1">
@@ -531,9 +562,7 @@ function TablaView({
           >
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 mb-0.5">
-                <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0', estadoStyle[c.estado])}>
-                  {c.estado}
-                </span>
+                <EstadoSelect cita={c} />
                 <span className="text-xs text-gray-400 truncate">{fmtDate(c.fecha_hora)}</span>
               </div>
               <p className="text-sm font-medium text-gray-900 truncate">{c.pacientes?.nombre ?? '—'}</p>
@@ -796,6 +825,15 @@ export default function Citas() {
 
   const [estadoFilter, setEstadoFilter] = useState('todos')
   const [detalle, setDetalle] = useState<Cita | null>(null)
+  // el modal de detalle guarda una copia local de la cita; si su estado cambia
+  // desde otro lugar (ej. el EstadoSelect de la tabla) hay que refrescarla o
+  // el modal mostraría el estado viejo al revalidar el loader
+  useEffect(() => {
+    if (!detalle) return
+    const fresh = citas.find(c => c.id === detalle.id)
+    if (fresh && fresh.estado !== detalle.estado) setDetalle(fresh)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [citas])
   const [modal, setModal] = useState<{ open: boolean; cita: Cita | null }>({ open: false, cita: null })
 
   const filteredCitas = useMemo(() => {
@@ -1018,7 +1056,7 @@ export default function Citas() {
                         <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
                       </div>
                     </div>
-                    <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0', estadoStyle[c.estado])}>{c.estado}</span>
+                    <EstadoSelect cita={c} />
                   </div>
                 ))}
               </div>
