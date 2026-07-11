@@ -22,7 +22,7 @@ import {
   Mail,
   Send,
 } from "lucide-react";
-import { cn } from "~/lib/utils";
+import { cn, fmtMoney } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
@@ -37,6 +37,7 @@ type Pago = {
   metodo_pago: string;
   fecha: string;
   notas: string | null;
+  verification_token: string | null;
   cita_id: string | null;
   paciente_id: string | null;
   tratamiento_id: string | null;
@@ -81,14 +82,9 @@ const deudaEstadoStyle: Record<string, string> = {
   cancelada: "bg-gray-100 text-gray-500",
 };
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("es-MX", {
-    style: "currency",
-    currency: "DOP",
-  }).format(n);
-}
+const fmt = fmtMoney;
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString("es-MX", { dateStyle: "medium" });
+  return new Date(iso).toLocaleDateString("es-DO", { dateStyle: "medium" });
 }
 
 export function meta(): Route.MetaDescriptors {
@@ -112,7 +108,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     supabase
       .from("pagos")
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .eq("clinica_id", clinicaId)
       .order("fecha", { ascending: false }),
@@ -177,16 +173,17 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get("intent") as string;
 
   if (intent === "delete") {
-    await supabase
+    const { error } = await supabase
       .from("pagos")
       .delete()
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
   if (intent === "create-deuda") {
-    await supabase.from("deudas").insert({
+    const { error } = await supabase.from("deudas").insert({
       clinica_id: clinicaId,
       paciente_id: (fd.get("paciente_id") as string) || null,
       cita_id: (fd.get("cita_id") as string) || null,
@@ -194,22 +191,24 @@ export async function action({ request }: Route.ActionArgs) {
       concepto: fd.get("concepto") as string,
       monto_total: Number(fd.get("monto_total")),
     });
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
   if (intent === "cancel-deuda") {
-    await supabase
+    const { error } = await supabase
       .from("deudas")
       .update({ estado: "cancelada" })
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
   if (intent === "abono") {
     const deudaId = fd.get("deuda_id") as string;
     const monto = Number(fd.get("monto"));
-    await supabase.from("pagos").insert({
+    const { error } = await supabase.from("pagos").insert({
       clinica_id: clinicaId,
       deuda_id: deudaId,
       paciente_id: (fd.get("paciente_id") as string) || null,
@@ -221,14 +220,16 @@ export async function action({ request }: Route.ActionArgs) {
       fecha: fd.get("fecha") as string,
       notas: (fd.get("notas") as string) || null,
     });
+    if (error) return { ok: false, error: error.message };
     // auto-liquidar si saldo cubierto
     const montoTotal = Number(fd.get("monto_total"));
     const montoPagado = Number(fd.get("monto_pagado")) + monto;
     if (montoPagado >= montoTotal) {
-      await supabase
+      const { error: errorLiquidar } = await supabase
         .from("deudas")
         .update({ estado: "liquidada" })
         .eq("id", deudaId);
+      if (errorLiquidar) return { ok: false, error: errorLiquidar.message };
     }
     return { ok: true };
   }
@@ -251,18 +252,20 @@ export async function action({ request }: Route.ActionArgs) {
       .from("pagos")
       .insert(data)
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .single();
     if (error) return { ok: false, error: error.message };
     return { ok: true, intent: "create", pago: created as unknown as Pago };
   }
-  if (intent === "update")
-    await supabase
+  if (intent === "update") {
+    const { error } = await supabase
       .from("pagos")
       .update(data)
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
+  }
   return { ok: true };
 }
 
@@ -856,7 +859,7 @@ function PagoDetalleModal({
               <p className="text-xs text-gray-400">Cita vinculada</p>
               <p className="font-medium text-gray-900 mt-0.5">
                 {pago.citas.tratamientos?.nombre ?? "Cita"} ·{" "}
-                {new Date(pago.citas.fecha_hora).toLocaleDateString("es-MX", {
+                {new Date(pago.citas.fecha_hora).toLocaleDateString("es-DO", {
                   dateStyle: "medium",
                 })}
               </p>
@@ -1094,7 +1097,7 @@ function PagoEditModal({
                 <option key={c.id} value={c.id}>
                   {c.pacientes?.nombre ?? "?"} ·{" "}
                   {c.tratamientos?.nombre ?? "Sin trat."} ·{" "}
-                  {new Date(c.fecha_hora).toLocaleDateString("es-MX", {
+                  {new Date(c.fecha_hora).toLocaleDateString("es-DO", {
                     dateStyle: "short",
                   })}
                 </option>
@@ -1164,7 +1167,7 @@ function ReciboModal({
 
   async function handlePrint() {
     const QRCode = (await import("qrcode")).default;
-    const qrUrl = `${window.location.origin}/verificar/${pago.id}`;
+    const qrUrl = `${window.location.origin}/verificar/${pago.id}${pago.verification_token ? `?token=${pago.verification_token}` : ""}`;
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 176, margin: 1, color: { dark: "#1e293b", light: "#ffffff" } });
     const logoUrl = `${window.location.origin}/ninlogo.png`
     const html = buildReciboHtml(pago, false, deuda ?? undefined, qrDataUrl, clinicaNombre, logoUrl);

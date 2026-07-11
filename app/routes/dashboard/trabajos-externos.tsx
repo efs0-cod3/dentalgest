@@ -129,8 +129,10 @@ export async function action({ request }: Route.ActionArgs) {
     const clienteId = fd.get('id') as string
     // cascade manually: jobs reference invoices and both reference the client,
     // so the FK would silently block a bare client delete
-    await supabase.from('trabajos_externos').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
-    await supabase.from('facturas_externas').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
+    const { error: trabajosErr } = await supabase.from('trabajos_externos').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
+    if (trabajosErr) return { ok: false, error: trabajosErr.message, intent }
+    const { error: facturasErr } = await supabase.from('facturas_externas').delete().eq('cliente_externo_id', clienteId).eq('clinica_id', clinicaId)
+    if (facturasErr) return { ok: false, error: facturasErr.message, intent }
     const { error } = await supabase.from('clientes_externos').delete().eq('id', clienteId).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message, intent }
     return { ok: true }
@@ -158,14 +160,16 @@ export async function action({ request }: Route.ActionArgs) {
 
   // ── trabajos ──
   if (intent === 'delete_trabajo') {
-    await supabase.from('trabajos_externos').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('trabajos_externos').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message, intent }
     return { ok: true }
   }
   if (intent === 'cambiar_estado_trabajo') {
     const nuevoEstado = fd.get('estado') as string
     const updates: Record<string, string | null> = { estado: nuevoEstado }
     if (nuevoEstado === 'entregado') updates.fecha_entregado = new Date().toISOString().slice(0, 10)
-    await supabase.from('trabajos_externos').update(updates).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('trabajos_externos').update(updates).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message, intent }
     return { ok: true }
   }
   if (intent === 'create_trabajo' || intent === 'update_trabajo') {
@@ -190,6 +194,10 @@ export async function action({ request }: Route.ActionArgs) {
     const archivo = fd.get('archivo') as File
     const trabajoId = fd.get('trabajo_id') as string
     if (!archivo || archivo.size === 0) return { ok: false, error: 'Selecciona un archivo primero.', intent }
+    if (archivo.size > 10 * 1024 * 1024) return { ok: false, error: 'La foto pesa más de 10 MB. Reduce su tamaño e intenta de nuevo.', intent }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(archivo.type)) {
+      return { ok: false, error: 'Tipo de archivo no permitido. Sube una imagen JPG, PNG o WebP.', intent }
+    }
     const ext = archivo.name.split('.').pop()
     const path = `${clinicaId}/${trabajoId}/${Date.now()}.${ext}`
     const bytes = await archivo.arrayBuffer()
@@ -242,7 +250,8 @@ export async function action({ request }: Route.ActionArgs) {
       fecha_vencimiento: fechaVencimiento,
     }).select().single()
     if (error || !factura) return { ok: false, error: error?.message ?? 'Error al crear la factura', intent }
-    await supabase.from('trabajos_externos').update({ factura_id: factura.id }).in('id', elegibles.map(t => t.id))
+    const { error: vincularErr } = await supabase.from('trabajos_externos').update({ factura_id: factura.id }).in('id', elegibles.map(t => t.id))
+    if (vincularErr) return { ok: false, error: vincularErr.message, intent }
     return { ok: true, intent }
   }
   if (intent === 'abono_factura_externa') {
@@ -263,15 +272,18 @@ export async function action({ request }: Route.ActionArgs) {
     const nuevoEstado = montoPagado >= total ? 'pagada' : 'parcial'
     const updates: Record<string, string> = { estado: nuevoEstado }
     if (nuevoEstado === 'pagada') updates.fecha_pago = new Date().toISOString().slice(0, 10)
-    await supabase.from('facturas_externas').update(updates).eq('id', facturaId).eq('clinica_id', clinicaId)
+    const { error: estadoErr } = await supabase.from('facturas_externas').update(updates).eq('id', facturaId).eq('clinica_id', clinicaId)
+    if (estadoErr) return { ok: false, error: estadoErr.message, intent }
     return { ok: true, intent }
   }
   if (intent === 'delete_factura') {
     const facturaId = fd.get('id') as string
     // un-bill the jobs first so the factura_id FK doesn't block the delete,
     // and they become eligible to be invoiced again
-    await supabase.from('trabajos_externos').update({ factura_id: null }).eq('factura_id', facturaId).eq('clinica_id', clinicaId)
-    await supabase.from('facturas_externas').delete().eq('id', facturaId).eq('clinica_id', clinicaId)
+    const { error: desvincularErr } = await supabase.from('trabajos_externos').update({ factura_id: null }).eq('factura_id', facturaId).eq('clinica_id', clinicaId)
+    if (desvincularErr) return { ok: false, error: desvincularErr.message, intent }
+    const { error: facturaErr } = await supabase.from('facturas_externas').delete().eq('id', facturaId).eq('clinica_id', clinicaId)
+    if (facturaErr) return { ok: false, error: facturaErr.message, intent }
     return { ok: true }
   }
 

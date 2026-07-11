@@ -16,7 +16,7 @@ export async function action({ request }: { request: Request }) {
   const { data: pagoData } = await supabase
     .from('pagos')
     .select(
-      'id,concepto,monto,tipo,metodo_pago,fecha,notas,deuda_id,pacientes(nombre),tratamientos(nombre,precio),citas(fecha_hora,tratamientos(nombre))',
+      'id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,deuda_id,pacientes(nombre),tratamientos(nombre,precio),citas(fecha_hora,tratamientos(nombre))',
     )
     .eq('id', pagoId)
     .eq('clinica_id', clinicaId)
@@ -53,7 +53,8 @@ export async function action({ request }: { request: Request }) {
   try {
     const { sendReciboEmail } = await import('~/lib/email.server')
     const QRCode = (await import('qrcode')).default
-    const qrUrl = `${new URL(request.url).origin}/verificar/${pagoId}`
+    const token = (pagoData as { verification_token?: string | null }).verification_token
+    const qrUrl = `${new URL(request.url).origin}/verificar/${pagoId}${token ? `?token=${token}` : ''}`
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 176, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
     const origin = new URL(request.url).origin
     const html = buildReciboHtml(pagoData as unknown as ReciboHtmlPago, true, deudaInfo, qrDataUrl, clinicaData?.nombre ?? 'Nin Dental Clinic', `${origin}/ninlogo.png`)

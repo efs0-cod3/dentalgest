@@ -5,7 +5,7 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { getHorarioAgenda } from '~/lib/agenda.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
-import { cn, drLocalToUTC } from '~/lib/utils'
+import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 
@@ -66,7 +66,8 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get('intent') as string
 
   if (intent === 'delete') {
-    await supabase.from('citas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('citas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
@@ -247,14 +248,14 @@ function EstadoSelect({ cita, className }: { cita: Cita; className?: string }) {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString('es-MX', {
+  return new Date(iso).toLocaleString('es-DO', {
     dateStyle: 'medium',
     timeStyle: 'short',
   })
 }
 
 function fmtTimeOnly(iso: string) {
-  return new Date(iso).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })
+  return new Date(iso).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })
 }
 
 function fmtDayNum(iso: string) {
@@ -262,17 +263,7 @@ function fmtDayNum(iso: string) {
 }
 
 function fmtMonthAbbr(iso: string) {
-  return new Date(iso).toLocaleDateString('es-MX', { month: 'short' }).replace('.', '')
-}
-
-const DR_OFFSET_MS = -4 * 60 * 60 * 1000 // UTC-4, no DST
-
-function toDatetimeLocal(iso: string) {
-  // must be the exact inverse of drLocalToUTC (UTC = DR local + 4h, so DR local = UTC - 4h);
-  // DR_OFFSET_MS is already negative, so adding it subtracts the 4 hours
-  const d = new Date(new Date(iso).getTime() + DR_OFFSET_MS)
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
+  return new Date(iso).toLocaleDateString('es-DO', { month: 'short' }).replace('.', '')
 }
 
 function daysInMonth(year: number, month: number) {
@@ -764,7 +755,7 @@ function WeekView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [citas, weekStart.getTime()])
 
-  const rangeLabel = `${days[0].toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' })}`
+  const rangeLabel = `${days[0].toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-DO', { day: 'numeric', month: 'short', year: 'numeric' })}`
   const today = new Date()
 
   return (
@@ -807,7 +798,7 @@ function WeekView({
                     className={cn('w-full text-left px-1.5 py-1 rounded text-xs', estadoStyle[c.estado])}
                   >
                     <p className="font-semibold">
-                      {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                     </p>
                     <p className="truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
                   </button>
@@ -858,7 +849,7 @@ function CalendarView({
     return map
   }, [citas, year, month])
 
-  const monthName = new Date(year, month, 1).toLocaleString('es-MX', { month: 'long', year: 'numeric' })
+  const monthName = new Date(year, month, 1).toLocaleString('es-DO', { month: 'long', year: 'numeric' })
 
   return (
     <div>
@@ -911,7 +902,7 @@ function CalendarView({
                           estadoStyle[c.estado]
                         )}
                       >
-                        {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                         {' '}{c.pacientes?.nombre ?? 'Sin paciente'}
                       </button>
                     ))}
@@ -1000,7 +991,7 @@ export default function Citas() {
     [citas]
   )
 
-  const fmtHoy = today.toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long' })
+  const fmtHoy = today.toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
 
   function setView(v: string) {
     setSearchParams(prev => { prev.set('view', v); return prev }, { replace: true })
@@ -1180,7 +1171,7 @@ export default function Citas() {
                       <Clock size={13} className="text-gray-400 mt-0.5 flex-shrink-0" />
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-gray-900">
-                          {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                          {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                         </p>
                         <p className="text-xs text-gray-500 truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
                         <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>

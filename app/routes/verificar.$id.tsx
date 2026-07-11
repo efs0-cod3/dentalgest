@@ -24,10 +24,13 @@ export function meta({ data }: Route.MetaArgs) {
 
 // ─── loader ───────────────────────────────────────────────────────────────────
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, request }: Route.LoaderArgs) {
   const pagoId = params.id as string;
+  const token = new URL(request.url).searchParams.get("token");
 
-  if (!pagoId || pagoId.length < 8) {
+  // el token dedicado (no el id del pago) es lo que autoriza la vista pública,
+  // igual que en verificar-trabajo y verificar-factura
+  if (!pagoId || pagoId.length < 8 || !token) {
     return { pago: null };
   }
 
@@ -37,6 +40,7 @@ export async function loader({ params }: Route.LoaderArgs) {
       .from("pagos")
       .select("id,concepto,monto,tipo,metodo_pago,fecha,pacientes(nombre)")
       .eq("id", pagoId)
+      .eq("verification_token", token)
       .single();
     return { pago: pago as unknown as PagoPublico | null };
   } catch {
@@ -47,10 +51,10 @@ export async function loader({ params }: Route.LoaderArgs) {
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 function fmtMXN(n: number) {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
+  return new Intl.NumberFormat("es-DO", { style: "currency", currency: "DOP" }).format(n);
 }
 function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString("es-MX", { dateStyle: "long" });
+  return new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { dateStyle: "long" });
 }
 const metodoMap: Record<string, string> = {
   efectivo: "Efectivo",

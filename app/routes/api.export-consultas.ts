@@ -1,15 +1,7 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { rowsToCsv } from '~/lib/csv'
-
-function calcularEdad(fechaNacimientoISO: string) {
-  const hoy = new Date()
-  const nac = new Date(fechaNacimientoISO)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const aunNoCumple = hoy.getMonth() < nac.getMonth() || (hoy.getMonth() === nac.getMonth() && hoy.getDate() < nac.getDate())
-  if (aunNoCumple) edad--
-  return edad
-}
+import { calcularEdad } from '~/lib/utils'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
@@ -45,7 +37,7 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const rows = entradas.map(e => ({
-    Fecha: new Date(e.fecha).toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' }),
+    Fecha: new Date(e.fecha).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }),
     Paciente: e.pacientes?.nombre ?? '',
     Edad: e.pacientes?.fecha_nacimiento ? calcularEdad(e.pacientes.fecha_nacimiento) : '',
     Cédula: e.pacientes?.cedula ?? '',

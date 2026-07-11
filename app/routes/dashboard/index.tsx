@@ -4,7 +4,7 @@ import type { Route } from './+types/index'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getClinicaId } from '~/lib/clinica.server'
 import { TrendingUp, TrendingDown, Users, Calendar, Clock, ChevronRight, DollarSign } from 'lucide-react'
-import { cn } from '~/lib/utils'
+import { cn, fmtMoney } from '~/lib/utils'
 
 const estadoStyle: Record<string, string> = {
   pendiente: 'bg-yellow-100 text-yellow-700',
@@ -13,9 +13,7 @@ const estadoStyle: Record<string, string> = {
   cancelada: 'bg-gray-100 text-gray-500',
 }
 
-function fmt(n: number) {
-  return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' }).format(n)
-}
+const fmt = fmtMoney
 
 export function meta(): Route.MetaDescriptors {
   return [{ title: 'Inicio — Nin Dental Clinic' }]
@@ -68,7 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     egresosHoy,
     balanceHoy: ingresosHoy - egresosHoy,
     ingresosMes,
-    fecha: now.toLocaleDateString('es-MX', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    fecha: now.toLocaleDateString('es-DO', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
   }
 }
 
@@ -165,7 +163,7 @@ export default function DashboardIndex() {
                 <div key={c.id} className="flex items-center gap-3 px-5 py-3">
                   <div className="text-center w-12 flex-shrink-0">
                     <p className="text-sm font-bold text-gray-900">
-                      {new Date(c.fecha_hora).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                      {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                     </p>
                     <p className="text-xs text-gray-400 flex items-center justify-center gap-0.5">
                       <Clock size={9} />{c.duracion_min}m
@@ -212,10 +210,10 @@ export default function DashboardIndex() {
                   <div key={c.id} className="flex items-center gap-3 px-5 py-3">
                     <div className="text-center w-12 flex-shrink-0">
                       <p className="text-xs font-bold text-gray-700">
-                        {d.toLocaleDateString('es-MX', { day: '2-digit', month: 'short' })}
+                        {d.toLocaleDateString('es-DO', { day: '2-digit', month: 'short' })}
                       </p>
                       <p className="text-xs text-gray-400">
-                        {d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' })}
+                        {d.toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                       </p>
                     </div>
                     <div className="flex-1 min-w-0">

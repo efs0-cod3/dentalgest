@@ -57,14 +57,19 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get('intent') as string
 
   if (intent === 'delete') {
-    await supabase.from('pacientes').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    const { error } = await supabase.from('pacientes').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
     return { ok: true }
   }
 
   const pacienteData = buildPacienteData(fd, clinicaId)
-  if (intent === 'create') await supabase.from('pacientes').insert(pacienteData)
-  else if (intent === 'update')
-    await supabase.from('pacientes').update(pacienteData).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+  if (intent === 'create') {
+    const { error } = await supabase.from('pacientes').insert(pacienteData)
+    if (error) return { ok: false, error: error.message }
+  } else if (intent === 'update') {
+    const { error } = await supabase.from('pacientes').update(pacienteData).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    if (error) return { ok: false, error: error.message }
+  }
   return { ok: true }
 }
 
@@ -151,7 +156,7 @@ export default function Pacientes() {
                         {p.citas.length}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-gray-400 text-xs">{new Date(p.created_at).toLocaleDateString('es-MX', { dateStyle: 'medium' })}</td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">{new Date(p.created_at).toLocaleDateString('es-DO', { dateStyle: 'medium' })}</td>
                     <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <button onClick={() => setEditModal({ open: true, paciente: p })}

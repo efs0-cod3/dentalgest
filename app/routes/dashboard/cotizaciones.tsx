@@ -20,7 +20,7 @@ import {
   CheckCircle,
   FileText,
 } from "lucide-react";
-import { cn } from "~/lib/utils";
+import { cn, fmtMoney } from "~/lib/utils";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -67,11 +67,9 @@ const METODOS = ["efectivo", "tarjeta", "transferencia"] as const;
 
 // ─── utils ────────────────────────────────────────────────────────────────────
 
-function fmt(n: number) {
-  return new Intl.NumberFormat("es-MX", { style: "currency", currency: "MXN" }).format(n);
-}
+const fmt = fmtMoney;
 function fmtDate(iso: string) {
-  return new Date(iso + "T00:00:00").toLocaleDateString("es-MX", { dateStyle: "medium" });
+  return new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { dateStyle: "medium" });
 }
 function computeEstado(c: Cotizacion): DisplayEstado {
   const today = new Date();
@@ -241,11 +239,12 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get("intent") as string;
 
   if (intent === "delete") {
-    await supabase
+    const { error } = await supabase
       .from("cotizaciones")
       .delete()
       .eq("id", fd.get("id") as string)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
@@ -269,7 +268,7 @@ export async function action({ request }: Route.ActionArgs) {
     const vencStr = venc.toISOString().slice(0, 10);
     const folio = id.slice(-8).toUpperCase();
 
-    await Promise.all([
+    const [{ error: congelarErr }, { error: pagoErr }] = await Promise.all([
       supabase
         .from("cotizaciones")
         .update({
@@ -291,6 +290,8 @@ export async function action({ request }: Route.ActionArgs) {
         notas: `Depósito 10% para reservar cotización #${folio}`,
       }),
     ]);
+    const congelaError = congelarErr ?? pagoErr;
+    if (congelaError) return { ok: false, error: congelaError.message };
     return { ok: true };
   }
 
@@ -298,7 +299,7 @@ export async function action({ request }: Route.ActionArgs) {
     const id = fd.get("id") as string;
     const venc = new Date();
     venc.setDate(venc.getDate() + 20);
-    await supabase
+    const { error } = await supabase
       .from("cotizaciones")
       .update({
         estado: "activa",
@@ -309,6 +310,7 @@ export async function action({ request }: Route.ActionArgs) {
       })
       .eq("id", id)
       .eq("clinica_id", clinicaId);
+    if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
 
@@ -350,19 +352,21 @@ export async function action({ request }: Route.ActionArgs) {
     cotId = newCot.id;
   } else {
     cotId = fd.get("id") as string;
-    await supabase
+    const { error: updateErr } = await supabase
       .from("cotizaciones")
       .update(cotData)
       .eq("id", cotId)
       .eq("clinica_id", clinicaId);
-    await supabase
+    if (updateErr) return { ok: false, error: updateErr.message };
+    const { error: deleteItemsErr } = await supabase
       .from("cotizacion_items")
       .delete()
       .eq("cotizacion_id", cotId);
+    if (deleteItemsErr) return { ok: false, error: deleteItemsErr.message };
   }
 
   if (items.length > 0) {
-    await supabase.from("cotizacion_items").insert(
+    const { error: itemsErr } = await supabase.from("cotizacion_items").insert(
       items.map((i) => ({
         cotizacion_id: cotId,
         descripcion: i.descripcion,
@@ -372,6 +376,7 @@ export async function action({ request }: Route.ActionArgs) {
         precio_total: i.precio_total,
       }))
     );
+    if (itemsErr) return { ok: false, error: itemsErr.message };
   }
   return { ok: true };
 }
