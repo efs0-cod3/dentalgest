@@ -42,13 +42,16 @@ export function meta(): Route.MetaDescriptors {
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   const clinicaId = await getClinicaId(request)
+  // RLS en `perfiles` solo permite ver la fila propia; el listado del equipo
+  // completo requiere el cliente admin (siempre filtrado por clinica_id)
+  const admin = createSupabaseAdminClient()
 
   const [{ data: clinica }, { data: doctores }, { data: tratamientos }, { data: perfiles }, { data: config }] =
     await Promise.all([
       supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion').eq('id', clinicaId).single(),
       supabase.from('doctores').select('id,nombre,especialidad,color').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,precio,duracion_min,color').eq('clinica_id', clinicaId).order('nombre'),
-      supabase.from('perfiles').select('id,rol,email').eq('clinica_id', clinicaId),
+      admin.from('perfiles').select('id,rol,email').eq('clinica_id', clinicaId),
       supabase.from('config_clinica').select('*').eq('clinica_id', clinicaId).single(),
     ])
 
@@ -137,9 +140,22 @@ export async function action({ request }: Route.ActionArgs) {
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
-  // Usuarios
+  // Usuarios — RLS en `perfiles` solo permite tocar la fila propia, así que
+  // estas mutaciones van con el cliente admin, previa verificación de que
+  // quien las ejecuta es propietario/admin de esta clínica
+  const requireGestorEquipo = async () => {
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return null
+    const { data: perfil } = await supabase.from('perfiles').select('rol,clinica_id').eq('id', user.id).single()
+    if (!perfil || perfil.clinica_id !== clinicaId) return null
+    if (!['propietario', 'admin'].includes(perfil.rol)) return null
+    return user
+  }
+
   if (intent === 'invite_user') {
     try {
+      const gestor = await requireGestorEquipo()
+      if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
       const admin = createSupabaseAdminClient()
       const emailInvite = fd.get('email') as string
       const rol = (fd.get('rol') as string) || 'recepcionista'
@@ -147,7 +163,7 @@ export async function action({ request }: Route.ActionArgs) {
         data: { clinica_id: clinicaId },
       })
       if (inviteErr) return { ok: false, error: inviteErr.message, intent }
-      const { error: perfilErr } = await supabase.from('perfiles').upsert(
+      const { error: perfilErr } = await admin.from('perfiles').upsert(
         { id: invited.user.id, clinica_id: clinicaId, rol, email: emailInvite },
         { onConflict: 'id' }
       )
@@ -158,13 +174,22 @@ export async function action({ request }: Route.ActionArgs) {
     }
   }
   if (intent === 'update_rol') {
-    const { error } = await supabase.from('perfiles')
+    const gestor = await requireGestorEquipo()
+    if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin.from('perfiles')
       .update({ rol: fd.get('rol') as string })
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
   if (intent === 'remove_user') {
-    const { error } = await supabase.from('perfiles').delete()
+    const gestor = await requireGestorEquipo()
+    if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    if ((fd.get('id') as string) === gestor.id) {
+      return { ok: false, error: 'No puedes quitar tu propio acceso', intent }
+    }
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin.from('perfiles').delete()
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
