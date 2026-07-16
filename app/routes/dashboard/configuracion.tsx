@@ -161,6 +161,7 @@ export async function action({ request }: Route.ActionArgs) {
       const rol = (fd.get('rol') as string) || 'recepcionista'
       const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(emailInvite, {
         data: { clinica_id: clinicaId },
+        redirectTo: `${new URL(request.url).origin}/auth/confirmar`,
       })
       if (inviteErr) return { ok: false, error: inviteErr.message, intent }
       const { error: perfilErr } = await admin.from('perfiles').upsert(

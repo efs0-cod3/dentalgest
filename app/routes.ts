@@ -3,6 +3,7 @@ import { type RouteConfig, index, route, layout } from '@react-router/dev/routes
 export default [
   index('routes/home.tsx'),
   route('login', 'routes/login.tsx'),
+  route('auth/confirmar', 'routes/auth.confirmar.tsx'),
   route('logout', 'routes/logout.tsx'),
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
   route('api/export-datos', 'routes/api.export-datos.ts'),
