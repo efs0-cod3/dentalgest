@@ -157,14 +157,37 @@ export async function action({ request }: Route.ActionArgs) {
       const gestor = await requireGestorEquipo()
       if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
       const admin = createSupabaseAdminClient()
-      const emailInvite = fd.get('email') as string
+      const emailInvite = (fd.get('email') as string).trim().toLowerCase()
       const rol = (fd.get('rol') as string) || 'recepcionista'
+      const redirectTo = `${new URL(request.url).origin}/auth/confirmar`
+
+      let invitedId: string
       const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(emailInvite, {
         data: { clinica_id: clinicaId },
+        redirectTo,
       })
-      if (inviteErr) return { ok: false, error: inviteErr.message, intent }
+      if (!inviteErr) {
+        invitedId = invited.user.id
+      } else if (inviteErr.status === 422 || /already.*registered/i.test(inviteErr.message)) {
+        // La cuenta ya existe (p. ej. una invitación anterior que no se completó):
+        // localizarla y reenviar un enlace de recuperación para que fije su contraseña
+        let existingId: string | null = null
+        for (let page = 1; page <= 20 && !existingId; page++) {
+          const { data: pageData, error: listErr } = await admin.auth.admin.listUsers({ page, perPage: 200 })
+          if (listErr) return { ok: false, error: listErr.message, intent }
+          existingId = pageData.users.find(u => u.email?.toLowerCase() === emailInvite)?.id ?? null
+          if (pageData.users.length < 200) break
+        }
+        if (!existingId) return { ok: false, error: 'Este correo ya está registrado pero no se pudo localizar la cuenta', intent }
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(emailInvite, { redirectTo })
+        if (resetErr) return { ok: false, error: resetErr.message, intent }
+        invitedId = existingId
+      } else {
+        return { ok: false, error: inviteErr.message, intent }
+      }
+
       const { error: perfilErr } = await admin.from('perfiles').upsert(
-        { id: invited.user.id, clinica_id: clinicaId, rol, email: emailInvite },
+        { id: invitedId, clinica_id: clinicaId, rol, email: emailInvite },
         { onConflict: 'id' }
       )
       if (perfilErr) return { ok: false, error: perfilErr.message, intent }

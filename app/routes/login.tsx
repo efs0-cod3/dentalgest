@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { Form, redirect, useActionData } from 'react-router'
 import type { Route } from './+types/login'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
@@ -28,6 +29,16 @@ export async function action({ request }: Route.ActionArgs) {
 
 export default function Login() {
   const actionData = useActionData<typeof action>()
+
+  // Si un enlace de invitación/recuperación aterriza aquí (Supabase redirige
+  // al Site URL cuando el redirect no está en la lista permitida), reenvía
+  // los tokens del fragmento a la página de activación de cuenta
+  useEffect(() => {
+    const h = window.location.hash
+    if (h.includes('access_token') || h.includes('error_description')) {
+      window.location.replace('/auth/confirmar' + h)
+    }
+  }, [])
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
