@@ -615,6 +615,23 @@ function CotizacionFormModal({
     ? convertirMoneda(totalActual, "USD", "DOP", parseFloat(tasa) || null)
     : null;
 
+  // al cambiar la moneda, reconvertir todos los ítems con la tasa vigente para
+  // que la cotización mantenga el mismo valor real (reversible en ambos sentidos)
+  function cambiarMoneda(siguiente: Moneda) {
+    if (siguiente === moneda) return;
+    const r = parseFloat(tasa) || null;
+    if (r && r > 0) {
+      setItems((prev) =>
+        prev.map((i) => {
+          const p = parseFloat(i.precio_unitario) || 0;
+          const c = convertirMoneda(p, moneda, siguiente, r);
+          return c != null ? { ...i, precio_unitario: String(Math.round(c * 100) / 100) } : i;
+        })
+      );
+    }
+    setMoneda(siguiente);
+  }
+
   useEffect(() => {
     if (fetcher.state === "idle" && fetcherData?.ok) onClose();
   }, [fetcher.state, fetcherData]);
@@ -716,7 +733,7 @@ function CotizacionFormModal({
                   <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
                   <select
                     value={moneda}
-                    onChange={(e) => setMoneda(e.target.value as Moneda)}
+                    onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
                     className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   >
                     <option value="DOP">RD$ — Pesos</option>
@@ -742,6 +759,9 @@ function CotizacionFormModal({
                     )}
                   </>
                 )}
+                <p className="w-full text-xs text-gray-400">
+                  Al cambiar de moneda, los precios de los ítems se reconvierten con la tasa.
+                </p>
               </div>
             )}
 
