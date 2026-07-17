@@ -416,11 +416,13 @@ function ItemsEditor({
   items,
   tratamientos,
   moneda,
+  tasa,
   onChange,
 }: {
   items: ItemDraft[];
   tratamientos: Tratamiento[];
   moneda: Moneda;
+  tasa: number | null;
   onChange: (items: ItemDraft[]) => void;
 }) {
   function addItem() {
@@ -441,10 +443,16 @@ function ItemsEditor({
   function selectTratamiento(tempId: string, tratId: string) {
     const t = tratamientos.find((t) => t.id === tratId);
     if (t) {
+      // el precio del catálogo está en pesos: convertir a USD con la tasa
+      // cuando la cotización está en dólares, para que fluya automáticamente
+      const convertido = moneda === "USD"
+        ? convertirMoneda(t.precio, "DOP", "USD", tasa)
+        : t.precio;
+      const precio = convertido != null ? Math.round(convertido * 100) / 100 : t.precio;
       updateItem(tempId, {
         tratamiento_id: tratId,
         descripcion: t.nombre,
-        precio_unitario: String(t.precio),
+        precio_unitario: String(precio),
       });
     } else {
       updateItem(tempId, { tratamiento_id: "" });
@@ -485,11 +493,15 @@ function ItemsEditor({
                   className="w-full px-2 py-1.5 border border-gray-200 rounded-lg text-xs bg-white text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">— Personalizado —</option>
-                  {tratamientos.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.nombre}
-                    </option>
-                  ))}
+                  {tratamientos.map((t) => {
+                    const conv = moneda === "USD" ? convertirMoneda(t.precio, "DOP", "USD", tasa) : t.precio;
+                    const precioTxt = conv != null ? fmt(Math.round(conv * 100) / 100, moneda) : fmt(t.precio, "DOP");
+                    return (
+                      <option key={t.id} value={t.id}>
+                        {t.nombre} · {precioTxt}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <div>
@@ -737,6 +749,7 @@ function CotizacionFormModal({
               items={items}
               tratamientos={tratamientos}
               moneda={moneda}
+              tasa={parseFloat(tasa) || null}
               onChange={setItems}
             />
 
