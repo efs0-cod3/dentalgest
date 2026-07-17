@@ -169,6 +169,30 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 // ─── action ───────────────────────────────────────────────────────────────────
 
+// recalcula el estado de una deuda a partir de sus abonos reales en la base de
+// datos, para que 'liquidada'/'pendiente' nunca quede desincronizado del saldo
+// al crear, editar o borrar movimientos vinculados. Las canceladas no se tocan.
+async function recalcularEstadoDeuda(
+  supabase: ReturnType<typeof createSupabaseServerClient>["supabase"],
+  clinicaId: string,
+  deudaId: string,
+) {
+  const { data: deuda } = await supabase
+    .from("deudas")
+    .select("monto_total,estado,pagos(monto,tipo)")
+    .eq("id", deudaId)
+    .eq("clinica_id", clinicaId)
+    .maybeSingle();
+  if (!deuda || deuda.estado === "cancelada") return;
+  const pagado = ((deuda.pagos ?? []) as { monto: number; tipo: string }[])
+    .filter((p) => p.tipo === "ingreso")
+    .reduce((s, p) => s + p.monto, 0);
+  const estado = pagado >= deuda.monto_total ? "liquidada" : "pendiente";
+  if (estado !== deuda.estado) {
+    await supabase.from("deudas").update({ estado }).eq("id", deudaId).eq("clinica_id", clinicaId);
+  }
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request);
   const clinicaId = await getClinicaId(request);
@@ -176,12 +200,22 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get("intent") as string;
 
   if (intent === "delete") {
+    const pagoId = fd.get("id") as string;
+    const { data: pagoPrevio } = await supabase
+      .from("pagos")
+      .select("deuda_id")
+      .eq("id", pagoId)
+      .eq("clinica_id", clinicaId)
+      .maybeSingle();
     const { error } = await supabase
       .from("pagos")
       .delete()
-      .eq("id", fd.get("id") as string)
+      .eq("id", pagoId)
       .eq("clinica_id", clinicaId);
     if (error) return { ok: false, error: error.message };
+    if (pagoPrevio?.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, pagoPrevio.deuda_id);
+    }
     return { ok: true };
   }
 
@@ -224,16 +258,8 @@ export async function action({ request }: Route.ActionArgs) {
       notas: (fd.get("notas") as string) || null,
     });
     if (error) return { ok: false, error: error.message };
-    // auto-liquidar si saldo cubierto
-    const montoTotal = Number(fd.get("monto_total"));
-    const montoPagado = Number(fd.get("monto_pagado")) + monto;
-    if (montoPagado >= montoTotal) {
-      const { error: errorLiquidar } = await supabase
-        .from("deudas")
-        .update({ estado: "liquidada" })
-        .eq("id", deudaId);
-      if (errorLiquidar) return { ok: false, error: errorLiquidar.message };
-    }
+    // auto-liquidar si el saldo quedó cubierto (recalculado contra la BD)
+    await recalcularEstadoDeuda(supabase, clinicaId, deudaId);
     return { ok: true };
   }
 
@@ -259,15 +285,32 @@ export async function action({ request }: Route.ActionArgs) {
       )
       .single();
     if (error) return { ok: false, error: error.message };
+    if (data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, data.deuda_id);
+    }
     return { ok: true, intent: "create", pago: created as unknown as Pago };
   }
   if (intent === "update") {
+    const pagoId = fd.get("id") as string;
+    const { data: pagoPrevio } = await supabase
+      .from("pagos")
+      .select("deuda_id")
+      .eq("id", pagoId)
+      .eq("clinica_id", clinicaId)
+      .maybeSingle();
     const { error } = await supabase
       .from("pagos")
       .update(data)
-      .eq("id", fd.get("id") as string)
+      .eq("id", pagoId)
       .eq("clinica_id", clinicaId);
     if (error) return { ok: false, error: error.message };
+    // recalcular tanto la deuda anterior (si se desvinculó) como la nueva
+    if (pagoPrevio?.deuda_id && pagoPrevio.deuda_id !== data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, pagoPrevio.deuda_id);
+    }
+    if (data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, data.deuda_id);
+    }
   }
   return { ok: true };
 }
