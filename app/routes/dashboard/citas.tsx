@@ -92,9 +92,24 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true }
   }
 
+  // paciente creado desde el propio formulario de cita
+  let pacienteId = (fd.get('paciente_id') as string) || null
+  const nuevoNombre = ((fd.get('paciente_nuevo_nombre') as string) ?? '').trim()
+  if (!pacienteId && nuevoNombre) {
+    const { data: nuevoPaciente, error: pacienteErr } = await supabase.from('pacientes')
+      .insert({
+        clinica_id: clinicaId,
+        nombre: nuevoNombre,
+        telefono: ((fd.get('paciente_nuevo_telefono') as string) ?? '').trim() || null,
+      })
+      .select('id').single()
+    if (pacienteErr) return { ok: false, error: pacienteErr.message }
+    pacienteId = nuevoPaciente.id
+  }
+
   const data = {
     clinica_id: clinicaId,
-    paciente_id: fd.get('paciente_id') || null,
+    paciente_id: pacienteId,
     doctor_id: fd.get('doctor_id') || null,
     tratamiento_id: fd.get('tratamiento_id') || null,
     fecha_hora: fd.get('fecha_hora') as string,
@@ -417,6 +432,7 @@ function CitaModal({
   const initial = cita ? toDatetimeLocal(cita.fecha_hora) : ''
   const [fechaDate, setFechaDate] = useState(initial.slice(0, 10))
   const [fechaTime, setFechaTime] = useState(initial.slice(11, 16))
+  const [nuevoPaciente, setNuevoPaciente] = useState(false)
   const fechaLocal = fechaDate && fechaTime ? `${fechaDate}T${fechaTime}` : ''
 
   // don't use useCloseOnSubmit here — it would close the modal even when the
@@ -454,17 +470,45 @@ function CitaModal({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Paciente</label>
-              <select
-                name="paciente_id"
-                defaultValue={cita?.paciente_id ?? ''}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">— Sin paciente —</option>
-                {pacientes.map(p => (
-                  <option key={p.id} value={p.id}>{p.nombre}</option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-medium text-gray-600">Paciente</label>
+                <button
+                  type="button"
+                  onClick={() => setNuevoPaciente(!nuevoPaciente)}
+                  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                >
+                  {nuevoPaciente ? '← Elegir existente' : '+ Nuevo paciente'}
+                </button>
+              </div>
+              {nuevoPaciente ? (
+                <div className="space-y-2">
+                  <input
+                    name="paciente_nuevo_nombre"
+                    required
+                    autoFocus
+                    placeholder="Nombre del paciente"
+                    className="w-full px-3 py-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <input
+                    name="paciente_nuevo_telefono"
+                    type="tel"
+                    placeholder="Teléfono (opcional)"
+                    className="w-full px-3 py-2 border border-blue-200 bg-blue-50/50 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-xs text-gray-400">Se agregará automáticamente a Pacientes.</p>
+                </div>
+              ) : (
+                <select
+                  name="paciente_id"
+                  defaultValue={cita?.paciente_id ?? ''}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— Sin paciente —</option>
+                  {pacientes.map(p => (
+                    <option key={p.id} value={p.id}>{p.nombre}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             <div>
