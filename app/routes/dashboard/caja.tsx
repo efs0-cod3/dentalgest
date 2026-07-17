@@ -22,7 +22,7 @@ import {
   Mail,
   Send,
 } from "lucide-react";
-import { cn, fmtMoney } from "~/lib/utils";
+import { cn, fmtMoney, utcToDrLocal } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
@@ -65,6 +65,8 @@ type Paciente = { id: string; nombre: string };
 type Cita = {
   id: string;
   fecha_hora: string;
+  paciente_id: string | null;
+  tratamiento_id: string | null;
   pacientes: { nombre: string } | null;
   tratamientos: { nombre: string } | null;
 };
@@ -119,7 +121,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       .order("nombre"),
     supabase
       .from("citas")
-      .select("id,fecha_hora,pacientes(nombre),tratamientos(nombre)")
+      .select("id,fecha_hora,paciente_id,tratamiento_id,pacientes(nombre),tratamientos(nombre)")
       .eq("clinica_id", clinicaId)
       .order("fecha_hora", { ascending: false })
       .limit(100),
@@ -927,6 +929,12 @@ function PagoEditModal({
     useState<Tratamiento[]>(initialTrat);
   const [monto, setMonto] = useState(pago ? String(pago.monto) : "");
   const [concepto, setConcepto] = useState(pago?.concepto ?? "");
+  const [pacienteId, setPacienteId] = useState(pago?.paciente_id ?? "");
+  const [fecha, setFecha] = useState(
+    pago
+      ? new Date(pago.fecha).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10),
+  );
 
   // on a fresh "create" (not edit), jump straight to the receipt instead of
   // just closing — no need to hunt the new entry down in the table afterward
@@ -949,6 +957,24 @@ function PagoEditModal({
     if (total > 0) setMonto(String(total));
     if (items.length > 0 && !pago)
       setConcepto(items.map((t) => t.nombre).join(" + "));
+  }
+
+  // al vincular una cita, prellenar paciente, tratamiento, concepto, monto y
+  // fecha con los datos de la cita — todos quedan editables
+  function handleCitaChange(citaId: string) {
+    if (!citaId) return;
+    const cita = citas.find((c) => c.id === citaId);
+    if (!cita) return;
+    if (cita.paciente_id) setPacienteId(cita.paciente_id);
+    setFecha(utcToDrLocal(cita.fecha_hora).slice(0, 10));
+    const trat = cita.tratamiento_id
+      ? tratamientos.find((t) => t.id === cita.tratamiento_id)
+      : null;
+    if (trat) {
+      setSelectedTrats([trat]);
+      setMonto(String(trat.precio));
+      setConcepto(trat.nombre);
+    }
   }
 
   return (
@@ -1056,11 +1082,8 @@ function PagoEditModal({
               <input
                 type="date"
                 name="fecha"
-                defaultValue={
-                  pago
-                    ? new Date(pago.fecha).toISOString().slice(0, 10)
-                    : new Date().toISOString().slice(0, 10)
-                }
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -1072,7 +1095,8 @@ function PagoEditModal({
             </label>
             <select
               name="paciente_id"
-              defaultValue={pago?.paciente_id ?? ""}
+              value={pacienteId}
+              onChange={(e) => setPacienteId(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Sin paciente —</option>
@@ -1091,6 +1115,7 @@ function PagoEditModal({
             <select
               name="cita_id"
               defaultValue={pago?.cita_id ?? ""}
+              onChange={(e) => handleCitaChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Sin cita —</option>
