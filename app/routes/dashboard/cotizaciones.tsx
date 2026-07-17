@@ -20,7 +20,7 @@ import {
   CheckCircle,
   FileText,
 } from "lucide-react";
-import { cn, fmtMoney } from "~/lib/utils";
+import { cn, fmtMoney, convertirMoneda, type Moneda } from "~/lib/utils";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -48,6 +48,8 @@ type Cotizacion = {
   monto_congelamiento: number | null;
   fecha_congelamiento: string | null;
   created_at: string;
+  moneda: Moneda;
+  tasa_cambio: number | null;
   pacientes: { nombre: string; email: string | null; telefono: string | null } | null;
   cotizacion_items: CotizacionItem[];
 };
@@ -104,14 +106,22 @@ function buildCotizacionHtml(c: Cotizacion): string {
     <tr style="background:${i%2===0?"#fff":"#f8fafc"}">
       <td style="padding:11px 16px;font-size:13px;color:#334155;border-bottom:1px solid #f1f5f9;">${esc(item.descripcion)}</td>
       <td style="padding:11px 16px;font-size:13px;color:#334155;text-align:center;border-bottom:1px solid #f1f5f9;">${item.cantidad}</td>
-      <td style="padding:11px 16px;font-size:13px;color:#334155;text-align:right;border-bottom:1px solid #f1f5f9;">${fmt(item.precio_unitario)}</td>
-      <td style="padding:11px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right;border-bottom:1px solid #f1f5f9;">${fmt(item.precio_total)}</td>
+      <td style="padding:11px 16px;font-size:13px;color:#334155;text-align:right;border-bottom:1px solid #f1f5f9;">${fmt(item.precio_unitario, c.moneda)}</td>
+      <td style="padding:11px 16px;font-size:13px;font-weight:700;color:#0f172a;text-align:right;border-bottom:1px solid #f1f5f9;">${fmt(item.precio_total, c.moneda)}</td>
     </tr>`).join("");
 
   const congeladoHtml = c.monto_congelamiento && c.fecha_congelamiento
     ? `<div style="margin-top:10px;padding:10px 14px;background:#f5f3ff;border-radius:8px;border:1px solid #ddd6fe;">
-        <p style="margin:0;font-size:12px;color:#7c3aed;font-weight:600;">❄️ Congelada el ${fmtDate(c.fecha_congelamiento)} — Depósito recibido: ${fmt(c.monto_congelamiento)}</p>
+        <p style="margin:0;font-size:12px;color:#7c3aed;font-weight:600;">❄️ Congelada el ${fmtDate(c.fecha_congelamiento)} — Depósito recibido: ${fmt(c.monto_congelamiento, c.moneda)}</p>
        </div>` : "";
+
+  // equivalente de referencia en pesos cuando la cotización está en dólares
+  const equivDop = c.moneda === "USD"
+    ? convertirMoneda(c.monto_total, "USD", "DOP", c.tasa_cambio)
+    : null;
+  const equivHtml = equivDop != null
+    ? `<p style="font-size:12px;color:#64748b;margin:4px 0 0;">≈ ${fmtMoney(equivDop, "DOP")} (tasa US$1 = RD$${c.tasa_cambio})</p>`
+    : "";
 
   return `<!DOCTYPE html><html lang="es"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -165,8 +175,9 @@ function buildCotizacionHtml(c: Cotizacion): string {
 
   <div style="padding:20px 28px;background:#f8faff;border-top:2px solid #e2e8f0;display:flex;justify-content:flex-end;">
     <div style="text-align:right;">
-      <p style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;margin:0 0 4px;">Total de la cotización</p>
-      <p style="font-size:34px;font-weight:800;color:#1e40af;margin:0;">${fmt(c.monto_total)}</p>
+      <p style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#94a3b8;margin:0 0 4px;">Total de la cotización${c.moneda === "USD" ? " (USD)" : ""}</p>
+      <p style="font-size:34px;font-weight:800;color:#1e40af;margin:0;">${fmt(c.monto_total, c.moneda)}</p>
+      ${equivHtml}
       ${congeladoHtml}
     </div>
   </div>
@@ -202,12 +213,12 @@ export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request);
   const clinicaId = await getClinicaId(request);
 
-  const [{ data: cotizaciones }, { data: pacientes }, { data: tratamientos }] =
+  const [{ data: cotizaciones }, { data: pacientes }, { data: tratamientos }, { data: config }] =
     await Promise.all([
       supabase
         .from("cotizaciones")
         .select(
-          "id,clinica_id,paciente_id,titulo,doctor,fecha,fecha_vencimiento,notas,estado,monto_total,monto_congelamiento,fecha_congelamiento,created_at,pacientes(nombre,email,telefono),cotizacion_items(id,cotizacion_id,descripcion,tratamiento_id,cantidad,precio_unitario,precio_total)"
+          "id,clinica_id,paciente_id,titulo,doctor,fecha,fecha_vencimiento,notas,estado,monto_total,monto_congelamiento,fecha_congelamiento,created_at,moneda,tasa_cambio,pacientes(nombre,email,telefono),cotizacion_items(id,cotizacion_id,descripcion,tratamiento_id,cantidad,precio_unitario,precio_total)"
         )
         .eq("clinica_id", clinicaId)
         .order("created_at", { ascending: false }),
@@ -221,12 +232,19 @@ export async function loader({ request }: Route.LoaderArgs) {
         .select("id,nombre,precio")
         .eq("clinica_id", clinicaId)
         .order("nombre"),
+      supabase
+        .from("config_clinica")
+        .select("caja_multimoneda,caja_tasa_usd")
+        .eq("clinica_id", clinicaId)
+        .maybeSingle(),
     ]);
 
   return {
     cotizaciones: (cotizaciones ?? []) as unknown as Cotizacion[],
     pacientes: (pacientes ?? []) as Paciente[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
+    multimoneda: config?.caja_multimoneda ?? false,
+    tasaUsd: (config?.caja_tasa_usd as number | null) ?? null,
   };
 }
 
@@ -254,7 +272,7 @@ export async function action({ request }: Route.ActionArgs) {
 
     const { data: cot } = await supabase
       .from("cotizaciones")
-      .select("id,monto_total,paciente_id,titulo")
+      .select("id,monto_total,paciente_id,titulo,moneda,tasa_cambio")
       .eq("id", id)
       .eq("clinica_id", clinicaId)
       .single();
@@ -287,6 +305,8 @@ export async function action({ request }: Route.ActionArgs) {
         tipo: "ingreso",
         metodo_pago: metodoPago,
         fecha: todayStr,
+        moneda: (cot as any).moneda ?? "DOP",
+        tasa_cambio: (cot as any).tasa_cambio ?? null,
         notas: `Depósito 10% para reservar cotización #${folio}`,
       }),
     ]);
@@ -330,6 +350,13 @@ export async function action({ request }: Route.ActionArgs) {
   const venc = new Date(fecha + "T00:00:00");
   venc.setDate(venc.getDate() + 20);
 
+  const moneda: Moneda = (fd.get("moneda") as string) === "USD" ? "USD" : "DOP";
+  const tasaRaw = parseFloat(fd.get("tasa_cambio") as string);
+  const tasaCambio = moneda === "USD" && Number.isFinite(tasaRaw) && tasaRaw > 0 ? tasaRaw : null;
+  if (moneda === "USD" && !tasaCambio) {
+    return { ok: false, error: "Ingresa una tasa de cambio válida para una cotización en dólares" };
+  }
+
   const cotData = {
     clinica_id: clinicaId,
     paciente_id: (fd.get("paciente_id") as string) || null,
@@ -339,6 +366,8 @@ export async function action({ request }: Route.ActionArgs) {
     fecha_vencimiento: venc.toISOString().slice(0, 10),
     notas: (fd.get("notas") as string) || null,
     monto_total: montoTotal,
+    moneda,
+    tasa_cambio: tasaCambio,
   };
 
   let cotId: string;
@@ -386,10 +415,12 @@ export async function action({ request }: Route.ActionArgs) {
 function ItemsEditor({
   items,
   tratamientos,
+  moneda,
   onChange,
 }: {
   items: ItemDraft[];
   tratamientos: Tratamiento[];
+  moneda: Moneda;
   onChange: (items: ItemDraft[]) => void;
 }) {
   function addItem() {
@@ -498,7 +529,7 @@ function ItemsEditor({
               <div className="flex items-center justify-between gap-2">
                 <div>
                   <p className="text-xs text-gray-500 mb-1">Total</p>
-                  <p className="text-sm font-semibold text-gray-900">{fmt(total)}</p>
+                  <p className="text-sm font-semibold text-gray-900">{fmt(total, moneda)}</p>
                 </div>
                 <button
                   type="button"
@@ -518,7 +549,7 @@ function ItemsEditor({
           <p className="text-sm font-bold text-gray-900">
             Total:{" "}
             <span className="text-blue-700">
-              {fmt(items.reduce((s, i) => s + (parseInt(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0), 0))}
+              {fmt(items.reduce((s, i) => s + (parseInt(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0), 0), moneda)}
             </span>
           </p>
         </div>
@@ -533,11 +564,15 @@ function CotizacionFormModal({
   cotizacion,
   pacientes,
   tratamientos,
+  multimoneda,
+  tasaUsd,
   onClose,
 }: {
   cotizacion: Cotizacion | null;
   pacientes: Paciente[];
   tratamientos: Tratamiento[];
+  multimoneda: boolean;
+  tasaUsd: number | null;
   onClose: () => void;
 }) {
   const fetcher = useFetcher<typeof action>();
@@ -555,6 +590,18 @@ function CotizacionFormModal({
         }))
       : []
   );
+  const [moneda, setMoneda] = useState<Moneda>(cotizacion?.moneda ?? "DOP");
+  const [tasa, setTasa] = useState<string>(
+    cotizacion?.tasa_cambio != null ? String(cotizacion.tasa_cambio) : (tasaUsd != null ? String(tasaUsd) : "")
+  );
+
+  const totalActual = items.reduce(
+    (s, i) => s + (parseInt(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0),
+    0
+  );
+  const equivDop = moneda === "USD"
+    ? convertirMoneda(totalActual, "USD", "DOP", parseFloat(tasa) || null)
+    : null;
 
   useEffect(() => {
     if (fetcher.state === "idle" && fetcherData?.ok) onClose();
@@ -594,6 +641,8 @@ function CotizacionFormModal({
             <input type="hidden" name="intent" value={cotizacion ? "update" : "create"} />
             {cotizacion && <input type="hidden" name="id" value={cotizacion.id} />}
             <input type="hidden" name="items_json" value={itemsJson} />
+            <input type="hidden" name="moneda" value={moneda} />
+            <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -649,9 +698,45 @@ function CotizacionFormModal({
               </div>
             </div>
 
+            {multimoneda && (
+              <div className="flex flex-wrap items-end gap-4 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
+                  <select
+                    value={moneda}
+                    onChange={(e) => setMoneda(e.target.value as Moneda)}
+                    className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="DOP">RD$ — Pesos</option>
+                    <option value="USD">US$ — Dólares</option>
+                  </select>
+                </div>
+                {moneda === "USD" && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tasa (RD$ por US$1)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={tasa}
+                        onChange={(e) => setTasa(e.target.value)}
+                        placeholder="60.00"
+                        className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                    {equivDop != null && (
+                      <p className="text-xs text-gray-500 pb-2">≈ {fmtMoney(equivDop, "DOP")}</p>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
             <ItemsEditor
               items={items}
               tratamientos={tratamientos}
+              moneda={moneda}
               onChange={setItems}
             />
 
@@ -819,15 +904,15 @@ function CotizacionDetalleModal({
                   <tr key={item.id}>
                     <td className="px-4 py-2.5 text-gray-800">{item.descripcion}</td>
                     <td className="px-3 py-2.5 text-center text-gray-600">{item.cantidad}</td>
-                    <td className="px-4 py-2.5 text-right text-gray-600">{fmt(item.precio_unitario)}</td>
-                    <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmt(item.precio_total)}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-600">{fmt(item.precio_unitario, cotizacion.moneda)}</td>
+                    <td className="px-4 py-2.5 text-right font-semibold text-gray-900">{fmt(item.precio_total, cotizacion.moneda)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="px-4 py-3 bg-blue-50 border-t border-blue-100 flex justify-between items-center">
-              <span className="text-xs font-medium text-blue-600">Total de la cotización</span>
-              <span className="text-lg font-bold text-blue-700">{fmt(cotizacion.monto_total)}</span>
+              <span className="text-xs font-medium text-blue-600">Total de la cotización{cotizacion.moneda === "USD" ? " (USD)" : ""}</span>
+              <span className="text-lg font-bold text-blue-700">{fmt(cotizacion.monto_total, cotizacion.moneda)}</span>
             </div>
           </div>
 
@@ -841,7 +926,7 @@ function CotizacionDetalleModal({
                 </p>
               </div>
               <p className="text-xs text-purple-600 mt-1">
-                Depósito pagado: <strong>{fmt(cotizacion.monto_congelamiento)}</strong> · Válida hasta: {fmtDate(cotizacion.fecha_vencimiento)}
+                Depósito pagado: <strong>{fmt(cotizacion.monto_congelamiento, cotizacion.moneda)}</strong> · Válida hasta: {fmtDate(cotizacion.fecha_vencimiento)}
               </p>
             </div>
           )}
@@ -862,7 +947,7 @@ function CotizacionDetalleModal({
                   <div>
                     <p className="text-xs font-semibold text-blue-800">¿Deseas congelar esta cotización?</p>
                     <p className="text-xs text-blue-600 mt-0.5">
-                      Requiere depósito de <strong>{fmt(deposito)}</strong> (10%) · Extiende 20 días más
+                      Requiere depósito de <strong>{fmt(deposito, cotizacion.moneda)}</strong> (10%) · Extiende 20 días más
                     </p>
                   </div>
                   <button
@@ -878,7 +963,7 @@ function CotizacionDetalleModal({
                   <input type="hidden" name="intent" value="congelar" />
                   <input type="hidden" name="id" value={cotizacion.id} />
                   <p className="text-xs font-semibold text-blue-800">
-                    Registrar depósito de congelamiento: <span className="text-blue-600">{fmt(deposito)}</span>
+                    Registrar depósito de congelamiento: <span className="text-blue-600">{fmt(deposito, cotizacion.moneda)}</span>
                   </p>
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">Método de pago</label>
@@ -968,7 +1053,7 @@ function CotizacionDetalleModal({
       <ConfirmDeleteModal
         title="Eliminar cotización"
         itemLabel={cotizacion.titulo ?? (cotizacion.pacientes?.nombre ?? "Sin paciente")}
-        description={`${fmt(cotizacion.monto_total)} · vence ${fmtDate(cotizacion.fecha_vencimiento)}. Esta acción no se puede deshacer.`}
+        description={`${fmt(cotizacion.monto_total, cotizacion.moneda)} · vence ${fmtDate(cotizacion.fecha_vencimiento)}. Esta acción no se puede deshacer.`}
         isSubmitting={navigation.state === "submitting"}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => submit({ intent: "delete", id: cotizacion.id }, { method: "post" })}
@@ -982,7 +1067,7 @@ function CotizacionDetalleModal({
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function Cotizaciones() {
-  const { cotizaciones, pacientes, tratamientos } = useLoaderData<typeof loader>();
+  const { cotizaciones, pacientes, tratamientos, multimoneda, tasaUsd } = useLoaderData<typeof loader>();
   const [detalle, setDetalle] = useState<Cotizacion | null>(null);
   const [formModal, setFormModal] = useState<{ open: boolean; cotizacion: Cotizacion | null }>({
     open: false,
@@ -1069,7 +1154,10 @@ export default function Cotizaciones() {
                           {fmtDate(c.fecha_vencimiento)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-semibold text-blue-700 whitespace-nowrap">{fmt(c.monto_total)}</td>
+                      <td className="px-4 py-3 font-semibold text-blue-700 whitespace-nowrap">
+                        {fmt(c.monto_total, c.moneda)}
+                        {c.moneda === "USD" && <span className="ml-1 text-xs font-medium text-gray-400">USD</span>}
+                      </td>
                       <td className="px-4 py-3">
                         <span className={cn("inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold", color)}>
                           <Icon size={10} /> {label}
@@ -1106,7 +1194,10 @@ export default function Cotizaciones() {
                         {c.pacientes?.nombre ?? "—"} · Vence {fmtDate(c.fecha_vencimiento)}
                       </p>
                     </div>
-                    <span className="text-sm font-semibold text-blue-700 whitespace-nowrap">{fmt(c.monto_total)}</span>
+                    <span className="text-sm font-semibold text-blue-700 whitespace-nowrap">
+                      {fmt(c.monto_total, c.moneda)}
+                      {c.moneda === "USD" && <span className="ml-1 text-xs font-medium text-gray-400">USD</span>}
+                    </span>
                   </div>
                 );
               })}
@@ -1131,6 +1222,8 @@ export default function Cotizaciones() {
           cotizacion={formModal.cotizacion}
           pacientes={pacientes}
           tratamientos={tratamientos}
+          multimoneda={multimoneda}
+          tasaUsd={tasaUsd}
           onClose={() => setFormModal({ open: false, cotizacion: null })}
         />
       )}
