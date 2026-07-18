@@ -33,7 +33,7 @@ function fmtDate(iso: string) { return new Date(iso).toLocaleDateString('es-DO',
 function fmtDateTime(iso: string) { return new Date(iso).toLocaleString('es-DO', { dateStyle: 'medium', timeStyle: 'short' }) }
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Consultas — Nin Dental Clinic' }]
+  return [{ title: 'Histórico de consultas — Nin Dental Clinic' }]
 }
 
 // ─── loader ───────────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ export default function Consultas() {
       <div className="flex items-center justify-between mb-4 md:mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Stethoscope size={22} className="text-blue-600" /> Consultas
+            <Stethoscope size={22} className="text-blue-600" /> Histórico de consultas
           </h1>
           <p className="text-sm text-gray-400 mt-0.5">Registro de consultas realizadas</p>
         </div>

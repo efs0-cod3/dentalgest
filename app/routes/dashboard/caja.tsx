@@ -22,7 +22,7 @@ import {
   Mail,
   Send,
 } from "lucide-react";
-import { cn, fmtMoney } from "~/lib/utils";
+import { cn, fmtMoney, utcToDrLocal } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
@@ -65,6 +65,8 @@ type Paciente = { id: string; nombre: string };
 type Cita = {
   id: string;
   fecha_hora: string;
+  paciente_id: string | null;
+  tratamiento_id: string | null;
   pacientes: { nombre: string } | null;
   tratamientos: { nombre: string } | null;
 };
@@ -119,7 +121,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       .order("nombre"),
     supabase
       .from("citas")
-      .select("id,fecha_hora,pacientes(nombre),tratamientos(nombre)")
+      .select("id,fecha_hora,paciente_id,tratamiento_id,pacientes(nombre),tratamientos(nombre)")
       .eq("clinica_id", clinicaId)
       .order("fecha_hora", { ascending: false })
       .limit(100),
@@ -167,6 +169,30 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 // ─── action ───────────────────────────────────────────────────────────────────
 
+// recalcula el estado de una deuda a partir de sus abonos reales en la base de
+// datos, para que 'liquidada'/'pendiente' nunca quede desincronizado del saldo
+// al crear, editar o borrar movimientos vinculados. Las canceladas no se tocan.
+async function recalcularEstadoDeuda(
+  supabase: ReturnType<typeof createSupabaseServerClient>["supabase"],
+  clinicaId: string,
+  deudaId: string,
+) {
+  const { data: deuda } = await supabase
+    .from("deudas")
+    .select("monto_total,estado,pagos(monto,tipo)")
+    .eq("id", deudaId)
+    .eq("clinica_id", clinicaId)
+    .maybeSingle();
+  if (!deuda || deuda.estado === "cancelada") return;
+  const pagado = ((deuda.pagos ?? []) as { monto: number; tipo: string }[])
+    .filter((p) => p.tipo === "ingreso")
+    .reduce((s, p) => s + p.monto, 0);
+  const estado = pagado >= deuda.monto_total ? "liquidada" : "pendiente";
+  if (estado !== deuda.estado) {
+    await supabase.from("deudas").update({ estado }).eq("id", deudaId).eq("clinica_id", clinicaId);
+  }
+}
+
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request);
   const clinicaId = await getClinicaId(request);
@@ -174,12 +200,22 @@ export async function action({ request }: Route.ActionArgs) {
   const intent = fd.get("intent") as string;
 
   if (intent === "delete") {
+    const pagoId = fd.get("id") as string;
+    const { data: pagoPrevio } = await supabase
+      .from("pagos")
+      .select("deuda_id")
+      .eq("id", pagoId)
+      .eq("clinica_id", clinicaId)
+      .maybeSingle();
     const { error } = await supabase
       .from("pagos")
       .delete()
-      .eq("id", fd.get("id") as string)
+      .eq("id", pagoId)
       .eq("clinica_id", clinicaId);
     if (error) return { ok: false, error: error.message };
+    if (pagoPrevio?.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, pagoPrevio.deuda_id);
+    }
     return { ok: true };
   }
 
@@ -222,16 +258,8 @@ export async function action({ request }: Route.ActionArgs) {
       notas: (fd.get("notas") as string) || null,
     });
     if (error) return { ok: false, error: error.message };
-    // auto-liquidar si saldo cubierto
-    const montoTotal = Number(fd.get("monto_total"));
-    const montoPagado = Number(fd.get("monto_pagado")) + monto;
-    if (montoPagado >= montoTotal) {
-      const { error: errorLiquidar } = await supabase
-        .from("deudas")
-        .update({ estado: "liquidada" })
-        .eq("id", deudaId);
-      if (errorLiquidar) return { ok: false, error: errorLiquidar.message };
-    }
+    // auto-liquidar si el saldo quedó cubierto (recalculado contra la BD)
+    await recalcularEstadoDeuda(supabase, clinicaId, deudaId);
     return { ok: true };
   }
 
@@ -257,15 +285,32 @@ export async function action({ request }: Route.ActionArgs) {
       )
       .single();
     if (error) return { ok: false, error: error.message };
+    if (data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, data.deuda_id);
+    }
     return { ok: true, intent: "create", pago: created as unknown as Pago };
   }
   if (intent === "update") {
+    const pagoId = fd.get("id") as string;
+    const { data: pagoPrevio } = await supabase
+      .from("pagos")
+      .select("deuda_id")
+      .eq("id", pagoId)
+      .eq("clinica_id", clinicaId)
+      .maybeSingle();
     const { error } = await supabase
       .from("pagos")
       .update(data)
-      .eq("id", fd.get("id") as string)
+      .eq("id", pagoId)
       .eq("clinica_id", clinicaId);
     if (error) return { ok: false, error: error.message };
+    // recalcular tanto la deuda anterior (si se desvinculó) como la nueva
+    if (pagoPrevio?.deuda_id && pagoPrevio.deuda_id !== data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, pagoPrevio.deuda_id);
+    }
+    if (data.deuda_id) {
+      await recalcularEstadoDeuda(supabase, clinicaId, data.deuda_id);
+    }
   }
   return { ok: true };
 }
@@ -927,6 +972,12 @@ function PagoEditModal({
     useState<Tratamiento[]>(initialTrat);
   const [monto, setMonto] = useState(pago ? String(pago.monto) : "");
   const [concepto, setConcepto] = useState(pago?.concepto ?? "");
+  const [pacienteId, setPacienteId] = useState(pago?.paciente_id ?? "");
+  const [fecha, setFecha] = useState(
+    pago
+      ? new Date(pago.fecha).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10),
+  );
 
   // on a fresh "create" (not edit), jump straight to the receipt instead of
   // just closing — no need to hunt the new entry down in the table afterward
@@ -949,6 +1000,24 @@ function PagoEditModal({
     if (total > 0) setMonto(String(total));
     if (items.length > 0 && !pago)
       setConcepto(items.map((t) => t.nombre).join(" + "));
+  }
+
+  // al vincular una cita, prellenar paciente, tratamiento, concepto, monto y
+  // fecha con los datos de la cita — todos quedan editables
+  function handleCitaChange(citaId: string) {
+    if (!citaId) return;
+    const cita = citas.find((c) => c.id === citaId);
+    if (!cita) return;
+    if (cita.paciente_id) setPacienteId(cita.paciente_id);
+    setFecha(utcToDrLocal(cita.fecha_hora).slice(0, 10));
+    const trat = cita.tratamiento_id
+      ? tratamientos.find((t) => t.id === cita.tratamiento_id)
+      : null;
+    if (trat) {
+      setSelectedTrats([trat]);
+      setMonto(String(trat.precio));
+      setConcepto(trat.nombre);
+    }
   }
 
   return (
@@ -1056,11 +1125,8 @@ function PagoEditModal({
               <input
                 type="date"
                 name="fecha"
-                defaultValue={
-                  pago
-                    ? new Date(pago.fecha).toISOString().slice(0, 10)
-                    : new Date().toISOString().slice(0, 10)
-                }
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -1072,7 +1138,8 @@ function PagoEditModal({
             </label>
             <select
               name="paciente_id"
-              defaultValue={pago?.paciente_id ?? ""}
+              value={pacienteId}
+              onChange={(e) => setPacienteId(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Sin paciente —</option>
@@ -1091,6 +1158,7 @@ function PagoEditModal({
             <select
               name="cita_id"
               defaultValue={pago?.cita_id ?? ""}
+              onChange={(e) => handleCitaChange(e.target.value)}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             >
               <option value="">— Sin cita —</option>

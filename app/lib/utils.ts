@@ -18,9 +18,33 @@ export function utcToDrLocal(iso: string) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 }
 
-// Moneda única de la app: peso dominicano con formato dominicano
-export function fmtMoney(n: number) {
-  return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(n)
+// Monedas soportadas por la app
+export type Moneda = 'DOP' | 'USD'
+export const MONEDAS: Moneda[] = ['DOP', 'USD']
+export const MONEDA_LABEL: Record<Moneda, string> = {
+  DOP: 'Peso dominicano (RD$)',
+  USD: 'Dólar estadounidense (US$)',
+}
+
+// Formatea un monto en la moneda indicada (DOP por defecto para retrocompatibilidad).
+// Ambas se muestran con locale dominicano para mantener separadores consistentes.
+export function fmtMoney(n: number, moneda: Moneda = 'DOP') {
+  return new Intl.NumberFormat('es-DO', { style: 'currency', currency: moneda }).format(n)
+}
+
+// Convierte un monto entre monedas usando la tasa RD$ por 1 US$.
+// Devuelve null si falta la tasa (no se puede convertir de forma fiable).
+export function convertirMoneda(
+  monto: number,
+  de: Moneda,
+  a: Moneda,
+  tasaUsd: number | null | undefined,
+): number | null {
+  if (de === a) return monto
+  if (!tasaUsd || tasaUsd <= 0) return null
+  if (de === 'USD' && a === 'DOP') return monto * tasaUsd
+  if (de === 'DOP' && a === 'USD') return monto / tasaUsd
+  return null
 }
 
 export function calcularEdad(fechaNacimientoISO: string) {

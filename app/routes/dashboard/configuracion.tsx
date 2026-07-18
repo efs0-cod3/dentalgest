@@ -29,6 +29,7 @@ type Config = {
   agenda_duracion_default_min: number; agenda_dias_laborables: number[]
   agenda_citas_simultaneas: boolean; caja_moneda: string
   caja_itbis: boolean; caja_auto_ingreso: boolean; notif_lab_alerta_dias: number
+  caja_multimoneda: boolean; caja_tasa_usd: number | null
 }
 
 // ─── meta ─────────────────────────────────────────────────────────────────────
@@ -60,6 +61,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     agenda_duracion_default_min: 30, agenda_dias_laborables: [1, 2, 3, 4, 5],
     agenda_citas_simultaneas: false, caja_moneda: 'DOP',
     caja_itbis: false, caja_auto_ingreso: false, notif_lab_alerta_dias: 2,
+    caja_multimoneda: false, caja_tasa_usd: null,
   }
 
   return {
@@ -252,10 +254,18 @@ export async function action({ request }: Route.ActionArgs) {
   // Caja
   if (intent === 'update_caja') {
     await ensureConfig()
+    const multimoneda = fd.get('caja_multimoneda') === 'true'
+    const tasaRaw = parseFloat(fd.get('caja_tasa_usd') as string)
+    const tasa = Number.isFinite(tasaRaw) && tasaRaw > 0 ? tasaRaw : null
+    if (multimoneda && !tasa) {
+      return { ok: false, error: 'Ingresa una tasa de cambio válida (RD$ por US$1) para aceptar dólares', intent }
+    }
     const { error } = await supabase.from('config_clinica').update({
       caja_moneda: (fd.get('caja_moneda') as string) || 'DOP',
       caja_itbis: fd.get('caja_itbis') === 'true',
       caja_auto_ingreso: fd.get('caja_auto_ingreso') === 'true',
+      caja_multimoneda: multimoneda,
+      caja_tasa_usd: tasa,
     }).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
@@ -818,15 +828,54 @@ function NotificacionesSection({ config }: { config: Config }) {
 
 function CajaSection({ config }: { config: Config }) {
   const f = useFetcher()
+  const [multimoneda, setMultimoneda] = useState(config.caja_multimoneda)
+  useEffect(() => { setMultimoneda(config.caja_multimoneda) }, [config.caja_multimoneda])
   return (
     <SectionCard title="Configuración de caja" description="Ajustes de moneda, impuestos y registro de pagos">
       <f.Form method="post" className="space-y-5">
         <input type="hidden" name="intent" value="update_caja" />
 
         <div>
-          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Moneda</label>
+          <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Moneda principal</label>
           <p className="text-sm text-gray-900">DOP — Peso dominicano</p>
-          <p className="text-xs text-gray-400 mt-0.5">Todos los montos de la app se muestran en pesos dominicanos.</p>
+          <p className="text-xs text-gray-400 mt-0.5">Moneda base de la clínica; los totales se consolidan en pesos.</p>
+        </div>
+
+        <div className="border-t border-gray-100 pt-1">
+          <div className="flex items-start justify-between gap-4 py-3">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-900">Aceptar dólares (USD)</p>
+              <p className="text-xs text-gray-500 mt-0.5">Permite crear cotizaciones y movimientos en dólares además de pesos</p>
+            </div>
+            <div className="flex-shrink-0 pt-0.5">
+              <button type="button" role="switch" aria-checked={multimoneda} onClick={() => setMultimoneda(!multimoneda)}
+                className={cn('relative inline-flex h-6 w-11 rounded-full transition-colors focus:outline-none',
+                  multimoneda ? 'bg-blue-600' : 'bg-gray-300')}>
+                <span className={cn('absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform',
+                  multimoneda ? 'translate-x-5' : 'translate-x-0')} />
+              </button>
+              <input type="hidden" name="caja_multimoneda" value={multimoneda.toString()} />
+            </div>
+          </div>
+          {multimoneda && (
+            <div className="pb-3">
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Tasa de cambio (RD$ por US$1)
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500">US$1 =</span>
+                <input type="number" name="caja_tasa_usd" step="0.01" min="0"
+                  defaultValue={config.caja_tasa_usd ?? ''} placeholder="60.00"
+                  className="w-32 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <span className="text-sm text-gray-500">RD$</span>
+              </div>
+              <p className="text-xs text-gray-400 mt-1">Se usa como tasa base; podrás ajustarla en cada cotización o movimiento.</p>
+            </div>
+          )}
+          {/* conserva la tasa guardada aunque se apague temporalmente el toggle */}
+          {!multimoneda && config.caja_tasa_usd != null && (
+            <input type="hidden" name="caja_tasa_usd" value={config.caja_tasa_usd} />
+          )}
         </div>
 
         <div className="border-t border-gray-100 pt-1 divide-y divide-gray-100">
