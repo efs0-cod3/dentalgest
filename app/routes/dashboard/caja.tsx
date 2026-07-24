@@ -1180,7 +1180,7 @@ function PagoEditModal({
             <X size={18} />
           </button>
         </div>
-        <Form method="post" className="p-6 space-y-4 overflow-y-auto flex-1">
+        <Form method="post" className="flex flex-col overflow-hidden flex-1">
           <input
             type="hidden"
             name="intent"
@@ -1196,183 +1196,189 @@ function PagoEditModal({
           <input type="hidden" name="moneda" value={moneda} />
           <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
 
-          {multimoneda && (
-            <div className="flex flex-wrap items-end gap-3 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
-                <select
-                  value={moneda}
-                  onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="DOP">RD$ — Pesos</option>
-                  <option value="USD">US$ — Dólares</option>
-                </select>
-              </div>
-              {moneda === "USD" && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Tasa (RD$ por US$1)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={tasa}
-                    onChange={(e) => setTasa(e.target.value)}
-                    placeholder="60.00"
-                    className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+          <div className="p-6 space-y-3 overflow-y-auto flex-1">
+            {/* Moneda + cita vinculada arriba: definen la denominación y
+                autocompletan el resto del formulario */}
+            <div className={cn("grid gap-3", multimoneda ? "sm:grid-cols-2" : "grid-cols-1")}>
+              {multimoneda && (
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
+                    <select
+                      value={moneda}
+                      onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="DOP">RD$ — Pesos</option>
+                      <option value="USD">US$ — Dólares</option>
+                    </select>
+                  </div>
+                  {moneda === "USD" && (
+                    <div className="w-24">
+                      <label className="block text-xs font-medium text-gray-600 mb-1">Tasa</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={tasa}
+                        onChange={(e) => setTasa(e.target.value)}
+                        placeholder="60.00"
+                        title="RD$ por US$1"
+                        className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
                 </div>
               )}
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Cita vinculada
+                </label>
+                <select
+                  name="cita_id"
+                  defaultValue={pago?.cita_id ?? ""}
+                  onChange={(e) => handleCitaChange(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">— Sin cita —</option>
+                  {citas.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.pacientes?.nombre ?? "?"} ·{" "}
+                      {c.tratamientos?.nombre ?? "Sin trat."} ·{" "}
+                      {new Date(c.fecha_hora).toLocaleDateString("es-DO", {
+                        dateStyle: "short",
+                      })}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Tipo
-              </label>
-              <select
-                name="tipo"
-                defaultValue={pago?.tipo ?? "ingreso"}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="ingreso">Ingreso</option>
-                <option value="egreso">Egreso</option>
-              </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Tipo
+                </label>
+                <select
+                  name="tipo"
+                  defaultValue={pago?.tipo ?? "ingreso"}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="ingreso">Ingreso</option>
+                  <option value="egreso">Egreso</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Método
+                </label>
+                <select
+                  name="metodo_pago"
+                  defaultValue={pago?.metodo_pago ?? "efectivo"}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  {METODOS.map((m) => (
+                    <option key={m} value={m}>
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
+
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Método
+                Concepto <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="concepto"
+                required
+                value={concepto}
+                onChange={(e) => setConcepto(e.target.value)}
+                placeholder="Ej. Limpieza dental"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <TratamientoSelector
+              tratamientos={tratamientos}
+              selected={selectedTrats}
+              moneda={moneda}
+              tasa={tasaNum}
+              onChange={handleTratsChange}
+            />
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Monto{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  name="monto"
+                  required
+                  min={0}
+                  step={1}
+                  value={monto}
+                  onChange={(e) => setMonto(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Fecha
+                </label>
+                <input
+                  type="date"
+                  name="fecha"
+                  value={fecha}
+                  onChange={(e) => setFecha(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Paciente
               </label>
               <select
-                name="metodo_pago"
-                defaultValue={pago?.metodo_pago ?? "efectivo"}
+                name="paciente_id"
+                value={pacienteId}
+                onChange={(e) => setPacienteId(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                {METODOS.map((m) => (
-                  <option key={m} value={m}>
-                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                <option value="">— Sin paciente —</option>
+                {pacientes.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}
                   </option>
                 ))}
               </select>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Concepto <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="concepto"
-              required
-              value={concepto}
-              onChange={(e) => setConcepto(e.target.value)}
-              placeholder="Ej. Limpieza dental"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <TratamientoSelector
-            tratamientos={tratamientos}
-            selected={selectedTrats}
-            moneda={moneda}
-            tasa={tasaNum}
-            onChange={handleTratsChange}
-          />
-
-          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Monto{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
+                Notas
               </label>
-              <input
-                type="number"
-                name="monto"
-                required
-                min={0}
-                step={1}
-                value={monto}
-                onChange={(e) => setMonto(e.target.value)}
-                placeholder="0.00"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              <textarea
+                name="notas"
+                rows={2}
+                defaultValue={pago?.notas ?? ""}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">
-                Fecha
-              </label>
-              <input
-                type="date"
-                name="fecha"
-                value={fecha}
-                onChange={(e) => setFecha(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
+
+            {actionData?.ok === false && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {actionData.error}
+              </p>
+            )}
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Paciente
-            </label>
-            <select
-              name="paciente_id"
-              value={pacienteId}
-              onChange={(e) => setPacienteId(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">— Sin paciente —</option>
-              {pacientes.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Cita vinculada
-            </label>
-            <select
-              name="cita_id"
-              defaultValue={pago?.cita_id ?? ""}
-              onChange={(e) => handleCitaChange(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">— Sin cita —</option>
-              {citas.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.pacientes?.nombre ?? "?"} ·{" "}
-                  {c.tratamientos?.nombre ?? "Sin trat."} ·{" "}
-                  {new Date(c.fecha_hora).toLocaleDateString("es-DO", {
-                    dateStyle: "short",
-                  })}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Notas
-            </label>
-            <textarea
-              name="notas"
-              rows={2}
-              defaultValue={pago?.notas ?? ""}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
-            />
-          </div>
-
-          {actionData?.ok === false && (
-            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
-              {actionData.error}
-            </p>
-          )}
-
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
