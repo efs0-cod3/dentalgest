@@ -22,7 +22,7 @@ import {
   Mail,
   Send,
 } from "lucide-react";
-import { cn, fmtMoney, utcToDrLocal } from "~/lib/utils";
+import { cn, fmtMoney, utcToDrLocal, convertirMoneda, type Moneda } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
@@ -42,6 +42,8 @@ type Pago = {
   paciente_id: string | null;
   tratamiento_id: string | null;
   deuda_id: string | null;
+  moneda: Moneda;
+  tasa_cambio: number | null;
   pacientes: { nombre: string; email: string | null } | null;
   citas: { fecha_hora: string; tratamientos: { nombre: string } | null } | null;
   tratamientos: { nombre: string; precio: number } | null;
@@ -55,6 +57,8 @@ type Deuda = {
   paciente_id: string | null;
   cita_id: string | null;
   tratamiento_id: string | null;
+  moneda: Moneda;
+  tasa_cambio: number | null;
   pacientes: { nombre: string } | null;
   tratamientos: { nombre: string } | null;
   monto_pagado: number;
@@ -89,6 +93,14 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-DO", { dateStyle: "medium" });
 }
 
+// consolida un monto a pesos para los totales del dashboard: usa la tasa
+// capturada en el registro; si falta (USD sin tasa), cae a la tasa base actual
+function aDop(monto: number, moneda: Moneda, tasaRegistro: number | null, tasaBase: number | null): number {
+  if (moneda === "DOP") return monto;
+  const conv = convertirMoneda(monto, "USD", "DOP", tasaRegistro ?? tasaBase);
+  return conv ?? monto;
+}
+
 export function meta(): Route.MetaDescriptors {
   return [{ title: "Caja — Nin Dental Clinic" }];
 }
@@ -106,11 +118,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     { data: tratamientos },
     { data: deudasRaw },
     { data: clinicaData },
+    { data: config },
   ] = await Promise.all([
     supabase
       .from("pagos")
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .eq("clinica_id", clinicaId)
       .order("fecha", { ascending: false }),
@@ -133,11 +146,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     supabase
       .from("deudas")
       .select(
-        "id,concepto,monto_total,estado,created_at,paciente_id,cita_id,tratamiento_id,pacientes(nombre),tratamientos(nombre),pagos(monto,tipo)",
+        "id,concepto,monto_total,estado,created_at,paciente_id,cita_id,tratamiento_id,moneda,tasa_cambio,pacientes(nombre),tratamientos(nombre),pagos(monto,tipo)",
       )
       .eq("clinica_id", clinicaId)
       .order("created_at", { ascending: false }),
     supabase.from("clinicas").select("nombre,rnc").eq("id", clinicaId).single(),
+    supabase.from("config_clinica").select("caja_multimoneda,caja_tasa_usd").eq("clinica_id", clinicaId).maybeSingle(),
   ]);
 
   const deudas: Deuda[] = (deudasRaw ?? []).map((d: any) => {
@@ -164,6 +178,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     deudas,
     clinicaNombre: clinicaData?.nombre ?? 'Nin Dental Clinic',
     clinicaRnc: (clinicaData?.rnc as string | null) ?? null,
+    multimoneda: config?.caja_multimoneda ?? false,
+    tasaUsd: (config?.caja_tasa_usd as number | null) ?? null,
   };
 }
 
@@ -199,6 +215,17 @@ export async function action({ request }: Route.ActionArgs) {
   const fd = await request.formData();
   const intent = fd.get("intent") as string;
 
+  // moneda + tasa_cambio desde el formulario (tasa obligatoria si es USD)
+  const parseMonedaTasa = (): { moneda: Moneda; tasa_cambio: number | null; error?: string } => {
+    const moneda: Moneda = (fd.get("moneda") as string) === "USD" ? "USD" : "DOP";
+    const raw = parseFloat(fd.get("tasa_cambio") as string);
+    const tasa = moneda === "USD" && Number.isFinite(raw) && raw > 0 ? raw : null;
+    if (moneda === "USD" && !tasa) {
+      return { moneda, tasa_cambio: null, error: "Ingresa una tasa de cambio válida (RD$ por US$1) para un monto en dólares" };
+    }
+    return { moneda, tasa_cambio: tasa };
+  };
+
   if (intent === "delete") {
     const pagoId = fd.get("id") as string;
     const { data: pagoPrevio } = await supabase
@@ -220,6 +247,8 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "create-deuda") {
+    const mt = parseMonedaTasa();
+    if (mt.error) return { ok: false, error: mt.error };
     const { error } = await supabase.from("deudas").insert({
       clinica_id: clinicaId,
       paciente_id: (fd.get("paciente_id") as string) || null,
@@ -227,6 +256,8 @@ export async function action({ request }: Route.ActionArgs) {
       tratamiento_id: (fd.get("tratamiento_id") as string) || null,
       concepto: fd.get("concepto") as string,
       monto_total: Number(fd.get("monto_total")),
+      moneda: mt.moneda,
+      tasa_cambio: mt.tasa_cambio,
     });
     if (error) return { ok: false, error: error.message };
     return { ok: true };
@@ -245,6 +276,14 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === "abono") {
     const deudaId = fd.get("deuda_id") as string;
     const monto = Number(fd.get("monto"));
+    // el abono siempre se registra en la moneda de la deuda (el saldo se
+    // calcula sumando abonos, así que deben compartir moneda)
+    const { data: deudaMon } = await supabase
+      .from("deudas")
+      .select("moneda,tasa_cambio")
+      .eq("id", deudaId)
+      .eq("clinica_id", clinicaId)
+      .maybeSingle();
     const { error } = await supabase.from("pagos").insert({
       clinica_id: clinicaId,
       deuda_id: deudaId,
@@ -255,6 +294,8 @@ export async function action({ request }: Route.ActionArgs) {
       tipo: "ingreso",
       metodo_pago: fd.get("metodo_pago") as string,
       fecha: fd.get("fecha") as string,
+      moneda: (deudaMon?.moneda as Moneda) ?? "DOP",
+      tasa_cambio: (deudaMon?.tasa_cambio as number | null) ?? null,
       notas: (fd.get("notas") as string) || null,
     });
     if (error) return { ok: false, error: error.message };
@@ -263,6 +304,8 @@ export async function action({ request }: Route.ActionArgs) {
     return { ok: true };
   }
 
+  const mt = parseMonedaTasa();
+  if (mt.error) return { ok: false, error: mt.error };
   const data = {
     clinica_id: clinicaId,
     concepto: fd.get("concepto") as string,
@@ -275,13 +318,15 @@ export async function action({ request }: Route.ActionArgs) {
     cita_id: (fd.get("cita_id") as string) || null,
     tratamiento_id: (fd.get("tratamiento_id") as string) || null,
     deuda_id: (fd.get("deuda_id") as string) || null,
+    moneda: mt.moneda,
+    tasa_cambio: mt.tasa_cambio,
   };
   if (intent === "create") {
     const { data: created, error } = await supabase
       .from("pagos")
       .insert(data)
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .single();
     if (error) return { ok: false, error: error.message };
@@ -363,11 +408,12 @@ function DeudaCard({
         </div>
         <div className="text-right flex-shrink-0">
           <p className="text-sm font-bold text-gray-900">
-            {fmt(deuda.monto_total)}
+            {fmt(deuda.monto_total, deuda.moneda)}
+            {deuda.moneda === "USD" && <span className="ml-1 text-xs font-medium text-gray-400">USD</span>}
           </p>
           {deuda.saldo > 0 && (
             <p className="text-xs text-red-500 font-medium">
-              Saldo: {fmt(deuda.saldo)}
+              Saldo: {fmt(deuda.saldo, deuda.moneda)}
             </p>
           )}
         </div>
@@ -376,7 +422,7 @@ function DeudaCard({
       {/* progress bar */}
       <div>
         <div className="flex items-center justify-between text-xs text-gray-400 mb-1">
-          <span>Pagado: {fmt(deuda.monto_pagado)}</span>
+          <span>Pagado: {fmt(deuda.monto_pagado, deuda.moneda)}</span>
           <span>{Math.round(deuda.porcentaje)}%</span>
         </div>
         <div className="w-full bg-gray-100 rounded-full h-1.5">
@@ -393,7 +439,7 @@ function DeudaCard({
       {deuda.estado === "pendiente" && (
         <div className="flex items-center justify-between">
           <p className="text-xs text-gray-400">
-            {deuda.saldo > 0 ? `Falta ${fmt(deuda.saldo)}` : "Monto cubierto"}
+            {deuda.saldo > 0 ? `Falta ${fmt(deuda.saldo, deuda.moneda)}` : "Monto cubierto"}
           </p>
           <div className="flex gap-2">
             <button
@@ -420,7 +466,7 @@ function DeudaCard({
       <ConfirmDeleteModal
         title="Cancelar cuenta"
         itemLabel={deuda.concepto}
-        description={`${deuda.pacientes?.nombre ?? "Sin paciente"} · ${fmt(deuda.monto_total)}. Esta acción no se puede deshacer.`}
+        description={`${deuda.pacientes?.nombre ?? "Sin paciente"} · ${fmt(deuda.monto_total, deuda.moneda)}. Esta acción no se puede deshacer.`}
         confirmLabel="Cancelar cuenta"
         isSubmitting={navigation.state === "submitting"}
         onCancel={() => setConfirmCancel(false)}
@@ -436,15 +482,25 @@ function DeudaCard({
 function TratamientoSelector({
   tratamientos,
   selected,
+  moneda = "DOP",
+  tasa = null,
   onChange,
 }: {
   tratamientos: Tratamiento[];
   selected: Tratamiento[];
+  moneda?: Moneda;
+  tasa?: number | null;
   onChange: (items: Tratamiento[]) => void;
 }) {
   const available = tratamientos.filter(
     (t) => !selected.some((s) => s.id === t.id),
   );
+  // precio del catálogo (en pesos) mostrado en la moneda seleccionada
+  const precioEn = (precioDop: number) => {
+    if (moneda === "DOP") return fmt(precioDop, "DOP");
+    const c = convertirMoneda(precioDop, "DOP", "USD", tasa);
+    return c != null ? fmt(Math.round(c * 100) / 100, "USD") : fmt(precioDop, "DOP");
+  };
 
   function add(id: string) {
     const t = tratamientos.find((t) => t.id === id);
@@ -471,7 +527,7 @@ function TratamientoSelector({
             >
               {t.nombre}
               <span className="text-blue-400 font-normal">
-                · {fmt(t.precio)}
+                · {precioEn(t.precio)}
               </span>
               <button
                 type="button"
@@ -503,7 +559,7 @@ function TratamientoSelector({
           <option value="">+ Agregar tratamiento…</option>
           {available.map((t) => (
             <option key={t.id} value={t.id}>
-              {t.nombre} — {fmt(t.precio)}
+              {t.nombre} — {precioEn(t.precio)}
             </option>
           ))}
         </select>
@@ -518,11 +574,15 @@ function NuevaDeudaModal({
   pacientes,
   tratamientos,
   citas,
+  multimoneda,
+  tasaUsd,
   onClose,
 }: {
   pacientes: Paciente[];
   tratamientos: Tratamiento[];
   citas: Cita[];
+  multimoneda: boolean;
+  tasaUsd: number | null;
   onClose: () => void;
 }) {
   const navigation = useNavigation();
@@ -530,13 +590,37 @@ function NuevaDeudaModal({
   const [selectedTrats, setSelectedTrats] = useState<Tratamiento[]>([]);
   const [monto, setMonto] = useState("");
   const [concepto, setConcepto] = useState("");
+  const [moneda, setMoneda] = useState<Moneda>("DOP");
+  const [tasa, setTasa] = useState<string>(tasaUsd != null ? String(tasaUsd) : "");
   useCloseOnSubmit(onClose);
+
+  const tasaNum = parseFloat(tasa) || null;
+
+  function montoDesdeTrats(items: Tratamiento[], mon: Moneda): string {
+    const totalDop = items.reduce((s, t) => s + t.precio, 0);
+    if (totalDop <= 0) return "";
+    if (mon === "USD") {
+      const c = convertirMoneda(totalDop, "DOP", "USD", tasaNum);
+      return c != null ? String(Math.round(c * 100) / 100) : "";
+    }
+    return String(totalDop);
+  }
 
   function handleTratsChange(items: Tratamiento[]) {
     setSelectedTrats(items);
-    const total = items.reduce((s, t) => s + t.precio, 0);
-    if (total > 0) setMonto(String(total));
+    const m = montoDesdeTrats(items, moneda);
+    if (m) setMonto(m);
     if (items.length > 0) setConcepto(items.map((t) => t.nombre).join(" + "));
+  }
+
+  function cambiarMoneda(siguiente: Moneda) {
+    if (siguiente === moneda) return;
+    const actual = parseFloat(monto) || 0;
+    if (actual > 0 && tasaNum) {
+      const c = convertirMoneda(actual, moneda, siguiente, tasaNum);
+      if (c != null) setMonto(String(Math.round(c * 100) / 100));
+    }
+    setMoneda(siguiente);
   }
 
   return (
@@ -561,6 +645,38 @@ function NuevaDeudaModal({
             name="tratamiento_id"
             value={selectedTrats[0]?.id ?? ""}
           />
+          <input type="hidden" name="moneda" value={moneda} />
+          <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
+
+          {multimoneda && (
+            <div className="flex flex-wrap items-end gap-3 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
+                <select
+                  value={moneda}
+                  onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="DOP">RD$ — Pesos</option>
+                  <option value="USD">US$ — Dólares</option>
+                </select>
+              </div>
+              {moneda === "USD" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Tasa (RD$ por US$1)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={tasa}
+                    onChange={(e) => setTasa(e.target.value)}
+                    placeholder="60.00"
+                    className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -597,12 +713,14 @@ function NuevaDeudaModal({
           <TratamientoSelector
             tratamientos={tratamientos}
             selected={selectedTrats}
+            moneda={moneda}
+            tasa={tasaNum}
             onChange={handleTratsChange}
           />
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">
-              Monto total <span className="text-red-500">*</span>
+              Monto total{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
             </label>
             <input
               type="number"
@@ -658,7 +776,8 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
           <div>
             <h2 className="font-semibold text-gray-900">Registrar abono</h2>
             <p className="text-xs text-gray-400 mt-0.5">
-              {deuda.concepto} · Saldo: {fmt(deuda.saldo)}
+              {deuda.concepto} · Saldo: {fmt(deuda.saldo, deuda.moneda)}
+              {deuda.moneda === "USD" && " (USD)"}
             </p>
           </div>
           <button
@@ -672,8 +791,8 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
         {/* mini progress */}
         <div className="px-6 pt-4">
           <div className="flex justify-between text-xs text-gray-400 mb-1">
-            <span>Pagado: {fmt(deuda.monto_pagado)}</span>
-            <span>Total: {fmt(deuda.monto_total)}</span>
+            <span>Pagado: {fmt(deuda.monto_pagado, deuda.moneda)}</span>
+            <span>Total: {fmt(deuda.monto_total, deuda.moneda)}</span>
           </div>
           <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
             <div
@@ -702,7 +821,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Monto del abono <span className="text-red-500">*</span>
+                Monto del abono{deuda.moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -839,7 +958,8 @@ function PagoDetalleModal({
                 )}
               >
                 {pago.tipo === "egreso" ? "−" : "+"}
-                {fmt(pago.monto)}
+                {fmt(pago.monto, pago.moneda)}
+                {pago.moneda === "USD" && <span className="ml-1 text-sm font-medium text-gray-400">USD</span>}
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -934,7 +1054,7 @@ function PagoDetalleModal({
       <ConfirmDeleteModal
         title="Eliminar movimiento"
         itemLabel={pago.concepto}
-        description={`${pago.tipo === "egreso" ? "−" : "+"}${fmt(pago.monto)} · ${fmtDate(pago.fecha)}${pago.pacientes ? ` · ${pago.pacientes.nombre}` : ""}. Esta acción no se puede deshacer.`}
+        description={`${pago.tipo === "egreso" ? "−" : "+"}${fmt(pago.monto, pago.moneda)} · ${fmtDate(pago.fecha)}${pago.pacientes ? ` · ${pago.pacientes.nombre}` : ""}. Esta acción no se puede deshacer.`}
         isSubmitting={navigation.state === "submitting"}
         onCancel={() => setConfirmDelete(false)}
         onConfirm={() => submit({ intent: "delete", id: pago.id }, { method: "post" })}
@@ -951,6 +1071,8 @@ function PagoEditModal({
   pacientes,
   citas,
   tratamientos,
+  multimoneda,
+  tasaUsd,
   onClose,
   onCreated,
 }: {
@@ -958,6 +1080,8 @@ function PagoEditModal({
   pacientes: Paciente[];
   citas: Cita[];
   tratamientos: Tratamiento[];
+  multimoneda: boolean;
+  tasaUsd: number | null;
   onClose: () => void;
   onCreated: (pago: Pago) => void;
 }) {
@@ -973,11 +1097,16 @@ function PagoEditModal({
   const [monto, setMonto] = useState(pago ? String(pago.monto) : "");
   const [concepto, setConcepto] = useState(pago?.concepto ?? "");
   const [pacienteId, setPacienteId] = useState(pago?.paciente_id ?? "");
+  const [moneda, setMoneda] = useState<Moneda>(pago?.moneda ?? "DOP");
+  const [tasa, setTasa] = useState<string>(
+    pago?.tasa_cambio != null ? String(pago.tasa_cambio) : (tasaUsd != null ? String(tasaUsd) : "")
+  );
   const [fecha, setFecha] = useState(
     pago
       ? new Date(pago.fecha).toISOString().slice(0, 10)
       : new Date().toISOString().slice(0, 10),
   );
+  const tasaNum = parseFloat(tasa) || null;
 
   // on a fresh "create" (not edit), jump straight to the receipt instead of
   // just closing — no need to hunt the new entry down in the table afterward
@@ -994,12 +1123,29 @@ function PagoEditModal({
     }
   }, [navigation.state]);
 
+  // convierte un monto en pesos a la moneda seleccionada (redondeado)
+  function enMoneda(montoDop: number): number {
+    if (moneda === "DOP") return montoDop;
+    const c = convertirMoneda(montoDop, "DOP", "USD", tasaNum);
+    return c != null ? Math.round(c * 100) / 100 : montoDop;
+  }
+
   function handleTratsChange(items: Tratamiento[]) {
     setSelectedTrats(items);
     const total = items.reduce((s, t) => s + t.precio, 0);
-    if (total > 0) setMonto(String(total));
+    if (total > 0) setMonto(String(enMoneda(total)));
     if (items.length > 0 && !pago)
       setConcepto(items.map((t) => t.nombre).join(" + "));
+  }
+
+  function cambiarMoneda(siguiente: Moneda) {
+    if (siguiente === moneda) return;
+    const actual = parseFloat(monto) || 0;
+    if (actual > 0 && tasaNum) {
+      const c = convertirMoneda(actual, moneda, siguiente, tasaNum);
+      if (c != null) setMonto(String(Math.round(c * 100) / 100));
+    }
+    setMoneda(siguiente);
   }
 
   // al vincular una cita, prellenar paciente, tratamiento, concepto, monto y
@@ -1015,7 +1161,7 @@ function PagoEditModal({
       : null;
     if (trat) {
       setSelectedTrats([trat]);
-      setMonto(String(trat.precio));
+      setMonto(String(enMoneda(trat.precio)));
       setConcepto(trat.nombre);
     }
   }
@@ -1047,6 +1193,38 @@ function PagoEditModal({
             name="tratamiento_id"
             value={selectedTrats[0]?.id ?? ""}
           />
+          <input type="hidden" name="moneda" value={moneda} />
+          <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
+
+          {multimoneda && (
+            <div className="flex flex-wrap items-end gap-3 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
+                <select
+                  value={moneda}
+                  onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
+                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="DOP">RD$ — Pesos</option>
+                  <option value="USD">US$ — Dólares</option>
+                </select>
+              </div>
+              {moneda === "USD" && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Tasa (RD$ por US$1)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={tasa}
+                    onChange={(e) => setTasa(e.target.value)}
+                    placeholder="60.00"
+                    className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -1098,13 +1276,15 @@ function PagoEditModal({
           <TratamientoSelector
             tratamientos={tratamientos}
             selected={selectedTrats}
+            moneda={moneda}
+            tasa={tasaNum}
             onChange={handleTratsChange}
           />
 
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
-                Monto <span className="text-red-500">*</span>
+                Monto{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
               </label>
               <input
                 type="number"
@@ -1320,7 +1500,7 @@ function ReciboModal({
                 </div>
                 <div className="text-right flex-shrink-0">
                   <p className="text-lg font-bold text-white">
-                    {fmt(pago.monto)}
+                    {fmt(pago.monto, pago.moneda)}
                   </p>
                   <p className="text-xs text-blue-200 mt-0.5">
                     {fmtDate(pago.fecha)}
@@ -1457,7 +1637,7 @@ function ReciboModal({
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function Caja() {
-  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre, clinicaRnc } =
+  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre, clinicaRnc, multimoneda, tasaUsd } =
     useLoaderData<typeof loader>();
   const [tipoFilter, setTipoFilter] = useState("todos");
   const [deudaTab, setDeudaTab] = useState<"pendiente" | "liquidada">(
@@ -1493,12 +1673,15 @@ export default function Caja() {
       d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear()
     );
   });
+  // los totales consolidan a pesos (usando la tasa capturada en cada registro)
+  const enDop = (p: { monto: number; moneda: Moneda; tasa_cambio: number | null }) =>
+    aDop(p.monto, p.moneda, p.tasa_cambio, tasaUsd);
   const ingresosMes = mesActual
     .filter((p) => p.tipo === "ingreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const egresosMes = mesActual
     .filter((p) => p.tipo === "egreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const balanceMes = ingresosMes - egresosMes;
 
   const hoy = pagos.filter((p) => {
@@ -1511,21 +1694,21 @@ export default function Caja() {
   });
   const ingresosHoy = hoy
     .filter((p) => p.tipo === "ingreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const egresosHoy = hoy
     .filter((p) => p.tipo === "egreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const balanceHoy = ingresosHoy - egresosHoy;
 
   const ingresosTotal = pagos
     .filter((p) => p.tipo === "ingreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const egresosTotal = pagos
     .filter((p) => p.tipo === "egreso")
-    .reduce((s, p) => s + p.monto, 0);
+    .reduce((s, p) => s + enDop(p), 0);
   const saldoTotalPendiente = deudas
     .filter((d) => d.estado === "pendiente")
-    .reduce((s, d) => s + d.saldo, 0);
+    .reduce((s, d) => s + aDop(d.saldo, d.moneda, d.tasa_cambio, tasaUsd), 0);
 
   return (
     <div className="p-4 md:p-8">
@@ -1544,9 +1727,14 @@ export default function Caja() {
 
       {/* KPI cards */}
       <div className="space-y-3 mb-6">
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
-          Hoy
-        </p>
+        <div className="flex items-baseline justify-between">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">
+            Hoy
+          </p>
+          {multimoneda && (
+            <p className="text-xs text-gray-400">Totales consolidados en RD$ a la tasa de cada registro</p>
+          )}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 md:gap-4">
           <div className="bg-white rounded-2xl border border-gray-200 p-5">
             <div className="flex items-center gap-2 mb-2">
@@ -1695,6 +1883,7 @@ export default function Caja() {
             {saldoTotalPendiente > 0 && (
               <p className="text-xs text-orange-500 font-medium mt-0.5">
                 Saldo pendiente total: {fmt(saldoTotalPendiente)}
+                {multimoneda && <span className="text-gray-400 font-normal"> (consolidado en RD$)</span>}
               </p>
             )}
           </div>
@@ -1806,7 +1995,8 @@ export default function Caja() {
                       </span>
                     </td>
                     <td className={cn("px-4 py-3 font-semibold whitespace-nowrap", p.tipo === "ingreso" ? "text-green-600" : "text-red-600")}>
-                      {p.tipo === "egreso" ? "−" : "+"}{fmt(p.monto)}
+                      {p.tipo === "egreso" ? "−" : "+"}{fmt(p.monto, p.moneda)}
+                      {p.moneda === "USD" && <span className="ml-1 text-xs font-medium text-gray-400">USD</span>}
                     </td>
                     <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
@@ -1838,7 +2028,8 @@ export default function Caja() {
                     </p>
                   </div>
                   <span className={cn("text-sm font-semibold whitespace-nowrap", p.tipo === "ingreso" ? "text-green-600" : "text-red-600")}>
-                    {p.tipo === "egreso" ? "−" : "+"}{fmt(p.monto)}
+                    {p.tipo === "egreso" ? "−" : "+"}{fmt(p.monto, p.moneda)}
+                    {p.moneda === "USD" && <span className="ml-0.5 text-xs font-medium text-gray-400">$</span>}
                   </span>
                 </div>
               ))}
@@ -1880,6 +2071,8 @@ export default function Caja() {
           pacientes={pacientes}
           citas={citas}
           tratamientos={tratamientos}
+          multimoneda={multimoneda}
+          tasaUsd={tasaUsd}
           onClose={() => setEditModal({ open: false, pago: null })}
           onCreated={(pago) => {
             setEditModal({ open: false, pago: null });
@@ -1892,6 +2085,8 @@ export default function Caja() {
           pacientes={pacientes}
           tratamientos={tratamientos}
           citas={citas}
+          multimoneda={multimoneda}
+          tasaUsd={tasaUsd}
           onClose={() => setNuevaDeudaOpen(false)}
         />
       )}
