@@ -624,9 +624,9 @@ function NuevaDeudaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+      <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <h2 className="font-semibold text-gray-900">
             Nueva cuenta por cobrar
           </h2>
@@ -637,7 +637,7 @@ function NuevaDeudaModal({
             <X size={18} />
           </button>
         </div>
-        <Form method="post" className="p-6 space-y-4">
+        <Form method="post" className="p-6 space-y-4 overflow-y-auto flex-1">
           <input type="hidden" name="intent" value="create-deuda" />
           {/* single tratamiento_id: first selected (or empty) */}
           <input
@@ -770,9 +770,9 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
   useCloseOnSubmit(onClose);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+      <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <div>
             <h2 className="font-semibold text-gray-900">Registrar abono</h2>
             <p className="text-xs text-gray-400 mt-0.5">
@@ -789,7 +789,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
         </div>
 
         {/* mini progress */}
-        <div className="px-6 pt-4">
+        <div className="px-6 pt-4 flex-shrink-0">
           <div className="flex justify-between text-xs text-gray-400 mb-1">
             <span>Pagado: {fmt(deuda.monto_pagado, deuda.moneda)}</span>
             <span>Total: {fmt(deuda.monto_total, deuda.moneda)}</span>
@@ -802,7 +802,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
           </div>
         </div>
 
-        <Form method="post" className="px-6 pb-6 space-y-4">
+        <Form method="post" className="px-6 pb-6 space-y-4 overflow-y-auto flex-1">
           <input type="hidden" name="intent" value="abono" />
           <input type="hidden" name="deuda_id" value={deuda.id} />
           <input type="hidden" name="monto_total" value={deuda.monto_total} />
@@ -1167,9 +1167,9 @@ function PagoEditModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+      <div className="w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-xl overflow-hidden flex flex-col max-h-[95vh] sm:max-h-[90vh]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
           <h2 className="font-semibold text-gray-900">
             {pago ? "Editar movimiento" : "Nuevo movimiento"}
           </h2>
@@ -1180,7 +1180,7 @@ function PagoEditModal({
             <X size={18} />
           </button>
         </div>
-        <Form method="post" className="p-6 space-y-4">
+        <Form method="post" className="p-6 space-y-4 overflow-y-auto flex-1">
           <input
             type="hidden"
             name="intent"
