@@ -21,6 +21,7 @@ import {
   Printer,
   Mail,
   Send,
+  MessageCircle,
 } from "lucide-react";
 import { cn, fmtMoney, utcToDrLocal, convertirMoneda, type Moneda } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
@@ -44,7 +45,7 @@ type Pago = {
   deuda_id: string | null;
   moneda: Moneda;
   tasa_cambio: number | null;
-  pacientes: { nombre: string; email: string | null } | null;
+  pacientes: { nombre: string; email: string | null; telefono: string | null } | null;
   citas: { fecha_hora: string; tratamientos: { nombre: string } | null } | null;
   tratamientos: { nombre: string; precio: number } | null;
 };
@@ -123,7 +124,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     supabase
       .from("pagos")
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email,telefono),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .eq("clinica_id", clinicaId)
       .order("fecha", { ascending: false }),
@@ -367,7 +368,7 @@ export async function action({ request }: Route.ActionArgs) {
       .from("pagos")
       .insert(data)
       .select(
-        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
+        "id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,cita_id,paciente_id,tratamiento_id,deuda_id,moneda,tasa_cambio,pacientes(nombre,email,telefono),citas(fecha_hora,tratamientos(nombre)),tratamientos(nombre,precio)",
       )
       .single();
     if (error) return { ok: false, error: error.message };
@@ -1602,11 +1603,28 @@ function ReciboModal({
   clinicaRnc: string | null;
 }) {
   const [showEmail, setShowEmail] = useState(false);
+  const [showWhatsapp, setShowWhatsapp] = useState(false);
   const [status, setStatus] = useState<"idle" | "sending" | "sent" | "error">(
     "idle",
   );
   const [errMsg, setErrMsg] = useState("");
   const pacienteEmail = pago.pacientes?.email ?? "";
+  const [waTelefono, setWaTelefono] = useState(pago.pacientes?.telefono ?? "");
+
+  function handleSendWhatsapp() {
+    // normaliza a formato internacional: solo dígitos; a los números locales
+    // de 10 dígitos (RD) se les antepone el código de país 1
+    let digits = waTelefono.replace(/\D/g, "");
+    if (digits.length === 10) digits = `1${digits}`;
+    const url = `${window.location.origin}/verificar/${pago.id}${pago.verification_token ? `?token=${pago.verification_token}` : ""}`;
+    const saludo = pago.pacientes?.nombre ? `Hola ${pago.pacientes.nombre}, le` : "Le";
+    const msg =
+      `${saludo} saluda ${clinicaNombre}. ` +
+      `Su recibo de pago: ${pago.concepto} — ${fmt(pago.monto, pago.moneda)}.` +
+      (deuda && deuda.saldo > 0 ? ` Saldo pendiente: ${fmt(deuda.saldo, pago.moneda)}.` : "") +
+      ` Puede verlo y verificarlo aquí: ${url}`;
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, "_blank");
+  }
 
   async function handlePrint() {
     const QRCode = (await import("qrcode")).default;
@@ -1743,6 +1761,7 @@ function ReciboModal({
               type="button"
               onClick={() => {
                 setShowEmail((v) => !v);
+                setShowWhatsapp(false);
                 setStatus("idle");
               }}
               className={cn(
@@ -1754,7 +1773,56 @@ function ReciboModal({
             >
               <Mail size={14} /> Correo
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowWhatsapp((v) => !v);
+                setShowEmail(false);
+                setStatus("idle");
+              }}
+              className={cn(
+                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors",
+                showWhatsapp
+                  ? "bg-green-600 text-white border-green-600"
+                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
+              )}
+            >
+              <MessageCircle size={14} /> WhatsApp
+            </button>
           </div>
+
+          {/* whatsapp section */}
+          {showWhatsapp && (
+            <div className="rounded-xl border border-green-100 bg-green-50 p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Teléfono (WhatsApp)
+                  {pago.pacientes?.telefono && (
+                    <span className="ml-1 text-green-500 font-normal">(del paciente)</span>
+                  )}
+                </label>
+                <input
+                  type="tel"
+                  value={waTelefono}
+                  onChange={(e) => setWaTelefono(e.target.value)}
+                  placeholder="809 555 1234"
+                  autoFocus
+                  className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={handleSendWhatsapp}
+                disabled={waTelefono.replace(/\D/g, "").length < 10}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+              >
+                <Send size={13} /> Abrir WhatsApp con el recibo
+              </button>
+              <p className="text-xs text-gray-500">
+                Se abre WhatsApp con el mensaje y el enlace al recibo listos — solo pulsa enviar.
+              </p>
+            </div>
+          )}
 
           {/* email section */}
           {showEmail && (
