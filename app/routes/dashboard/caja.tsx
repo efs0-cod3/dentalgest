@@ -637,7 +637,7 @@ function NuevaDeudaModal({
             <X size={18} />
           </button>
         </div>
-        <Form method="post" className="p-6 space-y-4 overflow-y-auto flex-1">
+        <Form method="post" className="flex flex-col overflow-hidden flex-1">
           <input type="hidden" name="intent" value="create-deuda" />
           {/* single tratamiento_id: first selected (or empty) */}
           <input
@@ -648,99 +648,102 @@ function NuevaDeudaModal({
           <input type="hidden" name="moneda" value={moneda} />
           <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
 
-          {multimoneda && (
-            <div className="flex flex-wrap items-end gap-3 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
-                <select
-                  value={moneda}
-                  onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
-                  className="px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="DOP">RD$ — Pesos</option>
-                  <option value="USD">US$ — Dólares</option>
-                </select>
-              </div>
-              {moneda === "USD" && (
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">Tasa (RD$ por US$1)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={tasa}
-                    onChange={(e) => setTasa(e.target.value)}
-                    placeholder="60.00"
-                    className="w-28 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+          <div className="p-6 space-y-3 overflow-y-auto flex-1">
+            {multimoneda && (
+              <div className="flex items-end gap-2 p-3 bg-blue-50/50 border border-blue-100 rounded-xl">
+                <div className="flex-1">
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Moneda</label>
+                  <select
+                    value={moneda}
+                    onChange={(e) => cambiarMoneda(e.target.value as Moneda)}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="DOP">RD$ — Pesos</option>
+                    <option value="USD">US$ — Dólares</option>
+                  </select>
                 </div>
+                {moneda === "USD" && (
+                  <div className="w-24">
+                    <label className="block text-xs font-medium text-gray-600 mb-1">Tasa</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={tasa}
+                      onChange={(e) => setTasa(e.target.value)}
+                      placeholder="60.00"
+                      title="RD$ por US$1"
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Concepto <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                name="concepto"
+                required
+                placeholder="Ej. Ortodoncia — plan completo"
+                value={concepto}
+                onChange={(e) => setConcepto(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Paciente
+              </label>
+              <select
+                name="paciente_id"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">— Sin paciente —</option>
+                {pacientes.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.nombre}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <TratamientoSelector
+              tratamientos={tratamientos}
+              selected={selectedTrats}
+              moneda={moneda}
+              tasa={tasaNum}
+              onChange={handleTratsChange}
+            />
+
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Monto total{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="number"
+                name="monto_total"
+                required
+                min={0}
+                step={1}
+                value={monto}
+                onChange={(e) => setMonto(e.target.value)}
+                placeholder="0.00"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              {selectedTrats.length > 1 && (
+                <p className="text-xs text-blue-500 mt-1">
+                  Suma de {selectedTrats.length} tratamientos auto-calculada.
+                </p>
               )}
             </div>
-          )}
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Concepto <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="text"
-              name="concepto"
-              required
-              placeholder="Ej. Ortodoncia — plan completo"
-              value={concepto}
-              onChange={(e) => setConcepto(e.target.value)}
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
           </div>
 
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Paciente
-            </label>
-            <select
-              name="paciente_id"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">— Sin paciente —</option>
-              {pacientes.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <TratamientoSelector
-            tratamientos={tratamientos}
-            selected={selectedTrats}
-            moneda={moneda}
-            tasa={tasaNum}
-            onChange={handleTratsChange}
-          />
-
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">
-              Monto total{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
-            </label>
-            <input
-              type="number"
-              name="monto_total"
-              required
-              min={0}
-              step={1}
-              value={monto}
-              onChange={(e) => setMonto(e.target.value)}
-              placeholder="0.00"
-              className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-            {selectedTrats.length > 1 && (
-              <p className="text-xs text-blue-500 mt-1">
-                Suma de {selectedTrats.length} tratamientos auto-calculada.
-              </p>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
@@ -802,7 +805,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
           </div>
         </div>
 
-        <Form method="post" className="px-6 pb-6 space-y-4 overflow-y-auto flex-1">
+        <Form method="post" className="flex flex-col overflow-hidden flex-1">
           <input type="hidden" name="intent" value="abono" />
           <input type="hidden" name="deuda_id" value={deuda.id} />
           <input type="hidden" name="monto_total" value={deuda.monto_total} />
@@ -818,6 +821,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
             />
           )}
 
+          <div className="px-6 pb-2 space-y-4 overflow-y-auto flex-1">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
@@ -885,8 +889,9 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
+          </div>
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 px-6 py-4 border-t border-gray-100 flex-shrink-0">
             <button
               type="button"
               onClick={onClose}
