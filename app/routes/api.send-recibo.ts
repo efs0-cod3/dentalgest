@@ -16,7 +16,7 @@ export async function action({ request }: { request: Request }) {
   const { data: pagoData } = await supabase
     .from('pagos')
     .select(
-      'id,concepto,monto,tipo,metodo_pago,fecha,notas,verification_token,deuda_id,pacientes(nombre),tratamientos(nombre,precio),citas(fecha_hora,tratamientos(nombre))',
+      'id,concepto,monto,tipo,metodo_pago,fecha,notas,moneda,verification_token,deuda_id,pacientes(nombre),tratamientos(nombre,precio),citas(fecha_hora,tratamientos(nombre))',
     )
     .eq('id', pagoId)
     .eq('clinica_id', clinicaId)

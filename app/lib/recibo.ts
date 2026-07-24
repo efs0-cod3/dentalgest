@@ -6,6 +6,7 @@ export type ReciboHtmlPago = {
   metodo_pago: string
   fecha: string
   notas?: string | null
+  moneda?: 'DOP' | 'USD'
   pacientes?: { nombre: string } | null
   citas?: { tratamientos?: { nombre: string } | null } | null
   tratamientos?: { nombre: string } | null
@@ -25,11 +26,13 @@ function esc(s: string) {
     .replace(/"/g, '&quot;')
 }
 
-function fmtDOP(n: number) {
-  return new Intl.NumberFormat('es-DO', { style: 'currency', currency: 'DOP' }).format(n)
+function fmtMon(n: number, moneda: 'DOP' | 'USD' = 'DOP') {
+  return new Intl.NumberFormat('es-DO', { style: 'currency', currency: moneda }).format(n)
 }
 
 export function buildReciboHtml(pago: ReciboHtmlPago, forEmail = false, deuda?: DeudaRecibo, qrDataUrl?: string, clinicaNombre?: string, clinicaLogoUrl?: string, clinicaRnc?: string | null): string {
+  const moneda = pago.moneda ?? 'DOP'
+  const fmtDOP = (n: number) => fmtMon(n, moneda)
   const folio = pago.id.slice(-8).toUpperCase()
   const fechaStr = new Date(pago.fecha).toLocaleDateString('es-DO', { dateStyle: 'long' })
   const montoFmt = fmtDOP(pago.monto)
