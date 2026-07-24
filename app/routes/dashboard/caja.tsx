@@ -1155,21 +1155,27 @@ function PagoEditModal({
       : new Date().toISOString().slice(0, 10),
   );
   const [tipo, setTipo] = useState(pago?.tipo ?? "ingreso");
-  // pago parcial: registrar el movimiento como abono a una cuenta por cobrar
+  // pago parcial: registrar el movimiento como abono a una cuenta por cobrar.
+  // El total de la cuenta es el campo Monto (auto-calculado de tratamientos);
+  // abonoAhora es lo que entra a caja en este momento.
   const [cobroTipo, setCobroTipo] = useState<"completo" | "parcial">("completo");
   const [abonoModo, setAbonoModo] = useState<"nueva" | "existente">("nueva");
-  const [montoTotal, setMontoTotal] = useState(""); // total de la cuenta (modo nueva)
+  const [abonoAhora, setAbonoAhora] = useState("");
   const [deudaSelId, setDeudaSelId] = useState(""); // cuenta existente elegida
   const tasaNum = parseFloat(tasa) || null;
 
   // solo se puede registrar un pago parcial al crear un ingreso nuevo
   const permiteParcial = !pago && tipo === "ingreso";
   const esParcial = permiteParcial && cobroTipo === "parcial";
+  const esParcialNueva = esParcial && abonoModo === "nueva";
   // cuentas pendientes del paciente elegido (para abonar a una existente)
   const deudasPaciente = deudas.filter(
     (d) => d.estado === "pendiente" && (!pacienteId || d.paciente_id === pacienteId),
   );
   const deudaSel = deudas.find((d) => d.id === deudaSelId) ?? null;
+  // en modo parcial-nueva, el pago que entra es el abono; en el resto, el monto
+  const montoPago = esParcialNueva ? abonoAhora : monto;
+  const pendienteNueva = Math.max(0, (parseFloat(monto) || 0) - (parseFloat(abonoAhora) || 0));
 
   // on a fresh "create" (not edit), jump straight to the receipt instead of
   // just closing — no need to hunt the new entry down in the table afterward
@@ -1272,11 +1278,13 @@ function PagoEditModal({
           />
           <input type="hidden" name="moneda" value={moneda} />
           <input type="hidden" name="tasa_cambio" value={moneda === "USD" ? tasa : ""} />
+          {/* monto que entra a caja: el abono en modo parcial-nueva, el monto en el resto */}
+          <input type="hidden" name="monto" value={montoPago} />
           {/* pago parcial (solo al crear un ingreso) */}
           <input type="hidden" name="cobro_tipo" value={esParcial ? "parcial" : "completo"} />
           {esParcial && <input type="hidden" name="abono_modo" value={abonoModo} />}
-          {esParcial && abonoModo === "nueva" && (
-            <input type="hidden" name="monto_total" value={montoTotal} />
+          {esParcialNueva && (
+            <input type="hidden" name="monto_total" value={monto} />
           )}
           {esParcial && abonoModo === "existente" && (
             <input type="hidden" name="deuda_id" value={deudaSelId} />
@@ -1373,88 +1381,6 @@ function PagoEditModal({
               </div>
             </div>
 
-            {permiteParcial && (
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  Cobro
-                </label>
-                <select
-                  value={cobroTipo}
-                  onChange={(e) => setCobroTipo(e.target.value as "completo" | "parcial")}
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="completo">Pago completo</option>
-                  <option value="parcial">Pago parcial (abono)</option>
-                </select>
-              </div>
-            )}
-
-            {esParcial && (
-              <div className="p-3 bg-amber-50/60 border border-amber-100 rounded-xl space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-gray-600 mb-1">
-                    Abonar a
-                  </label>
-                  <select
-                    value={abonoModo}
-                    onChange={(e) => setAbonoModo(e.target.value as "nueva" | "existente")}
-                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="nueva">Nueva cuenta por cobrar</option>
-                    <option value="existente">Cuenta existente</option>
-                  </select>
-                </div>
-
-                {abonoModo === "nueva" ? (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Monto total de la cuenta{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1}
-                      value={montoTotal}
-                      onChange={(e) => setMontoTotal(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                    <p className="text-xs text-gray-400 mt-1">
-                      Se creará la cuenta por este total; el saldo restante quedará pendiente.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">
-                      Cuenta existente <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={deudaSelId}
-                      onChange={(e) => seleccionarDeuda(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    >
-                      <option value="">— Elegir cuenta —</option>
-                      {deudasPaciente.map((d) => (
-                        <option key={d.id} value={d.id}>
-                          {d.concepto} · saldo {fmt(d.saldo, d.moneda)}
-                        </option>
-                      ))}
-                    </select>
-                    {deudasPaciente.length === 0 && (
-                      <p className="text-xs text-gray-400 mt-1">
-                        {pacienteId ? "Este paciente no tiene cuentas pendientes." : "No hay cuentas pendientes."}
-                      </p>
-                    )}
-                    {deudaSel && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Saldo actual: {fmt(deudaSel.saldo, deudaSel.moneda)} · en {deudaSel.moneda}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Concepto <span className="text-red-500">*</span>
@@ -1481,11 +1407,11 @@ function PagoEditModal({
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">
-                  {esParcial ? "Abono ahora" : "Monto"}{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
+                  {esParcialNueva ? "Monto total" : esParcial ? "Abono ahora" : "Monto"}
+                  {moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="number"
-                  name="monto"
                   required
                   min={0}
                   step={1}
@@ -1528,6 +1454,91 @@ function PagoEditModal({
               </select>
             </div>
 
+            {permiteParcial && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Cobro
+                </label>
+                <select
+                  value={cobroTipo}
+                  onChange={(e) => setCobroTipo(e.target.value as "completo" | "parcial")}
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="completo">Pago completo</option>
+                  <option value="parcial">Pago parcial (abono)</option>
+                </select>
+              </div>
+            )}
+
+            {esParcial && (
+              <div className="p-3 bg-amber-50/60 border border-amber-100 rounded-xl space-y-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">
+                    Abonar a
+                  </label>
+                  <select
+                    value={abonoModo}
+                    onChange={(e) => setAbonoModo(e.target.value as "nueva" | "existente")}
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="nueva">Nueva cuenta por cobrar</option>
+                    <option value="existente">Cuenta existente</option>
+                  </select>
+                </div>
+
+                {abonoModo === "nueva" ? (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Abono ahora{moneda === "USD" ? " (USD)" : ""} <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={abonoAhora}
+                      onChange={(e) => setAbonoAhora(e.target.value)}
+                      placeholder="0.00"
+                      autoFocus
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="text-xs text-gray-500 mt-1.5">
+                      Total de la cuenta: <strong>{fmt(parseFloat(monto) || 0, moneda)}</strong>
+                      {" · "}Queda pendiente: <strong className="text-orange-600">{fmt(pendienteNueva, moneda)}</strong>
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1">
+                      Cuenta existente <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={deudaSelId}
+                      onChange={(e) => seleccionarDeuda(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">— Elegir cuenta —</option>
+                      {deudasPaciente.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.concepto} · saldo {fmt(d.saldo, d.moneda)}
+                        </option>
+                      ))}
+                    </select>
+                    {deudasPaciente.length === 0 && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        {pacienteId ? "Este paciente no tiene cuentas pendientes." : "No hay cuentas pendientes."}
+                      </p>
+                    )}
+                    {deudaSel && (
+                      <p className="text-xs text-gray-500 mt-1.5">
+                        El monto de arriba se abona a esta cuenta. Saldo actual:{" "}
+                        <strong>{fmt(deudaSel.saldo, deudaSel.moneda)}</strong>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">
                 Notas
@@ -1559,7 +1570,9 @@ function PagoEditModal({
               type="submit"
               disabled={
                 isSubmitting ||
-                (esParcial && abonoModo === "nueva" && !(parseFloat(montoTotal) > 0)) ||
+                (esParcialNueva &&
+                  (!(parseFloat(abonoAhora) > 0) ||
+                    parseFloat(abonoAhora) > (parseFloat(monto) || 0))) ||
                 (esParcial && abonoModo === "existente" && !deudaSelId)
               }
               className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
