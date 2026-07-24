@@ -26,7 +26,7 @@ export async function action({ request }: { request: Request }) {
 
   const { data: clinicaData } = await supabase
     .from('clinicas')
-    .select('nombre,rnc')
+    .select('nombre,rnc,email')
     .eq('id', clinicaId)
     .single()
 
@@ -58,7 +58,10 @@ export async function action({ request }: { request: Request }) {
     const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 176, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
     const origin = new URL(request.url).origin
     const html = buildReciboHtml(pagoData as unknown as ReciboHtmlPago, true, deudaInfo, qrDataUrl, clinicaData?.nombre ?? 'Nin Dental Clinic', `${origin}/ninlogo.png`, clinicaData?.rnc ?? null)
-    await sendReciboEmail(email, `Recibo de pago — ${pagoData.concepto}`, html)
+    await sendReciboEmail(email, `Recibo de pago — ${pagoData.concepto}`, html, {
+      fromName: clinicaData?.nombre,
+      replyTo: clinicaData?.email,
+    })
     return Response.json({ ok: true, emailSent: true })
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'Error desconocido'
