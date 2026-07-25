@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect } from 'react'
 import { useLoaderData, useNavigate, useNavigation, useSubmit } from 'react-router'
 import type { Route } from './+types/pacientes'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
+import { filtroPropio } from '~/lib/permisos'
 import { buildPacienteData } from '~/lib/pacientes.server'
 import { Plus, Pencil, Trash2, Search, User } from 'lucide-react'
 import { cn } from '~/lib/utils'
@@ -35,8 +36,24 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
-  const { data } = await supabase.from('pacientes').select(`
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'pacientes')
+
+  // el rol doctor solo ve sus pacientes: los que tienen alguna cita o consulta
+  // suya (un paciente no está asignado a un doctor de forma directa)
+  let idsPropios: string[] | null = null
+  if (filtroPropio(rol) && doctorId) {
+    const [{ data: citas }, { data: consultas }] = await Promise.all([
+      supabase.from('citas').select('paciente_id').eq('clinica_id', clinicaId).eq('doctor_id', doctorId),
+      supabase.from('expediente_entradas').select('paciente_id').eq('clinica_id', clinicaId).eq('doctor_id', doctorId),
+    ])
+    idsPropios = [...new Set(
+      [...(citas ?? []), ...(consultas ?? [])]
+        .map(r => r.paciente_id as string | null)
+        .filter((id): id is string => !!id),
+    )]
+  }
+
+  const query = supabase.from('pacientes').select(`
       id, nombre, telefono, email, created_at,
       fecha_nacimiento, cedula, genero, direccion,
       tipo_sangre, alergias, antecedentes_medicos,
@@ -44,7 +61,12 @@ export async function loader({ request }: Route.LoaderArgs) {
       citas(id),
       expediente_entradas(id),
       documentos(id)
-    `).eq('clinica_id', clinicaId).order('nombre')
+    `).eq('clinica_id', clinicaId)
+
+  // sin pacientes propios, no debe ver el listado completo
+  if (idsPropios && idsPropios.length === 0) return { pacientes: [] as Paciente[] }
+
+  const { data } = await (idsPropios ? query.in('id', idsPropios) : query).order('nombre')
   return { pacientes: (data ?? []) as Paciente[] }
 }
 
@@ -52,7 +74,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'pacientes')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 

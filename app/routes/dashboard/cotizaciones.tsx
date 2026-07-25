@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Form, useLoaderData, useNavigation, useFetcher, useSubmit } from "react-router";
 import type { Route } from "./+types/cotizaciones";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
-import { getClinicaId } from "~/lib/clinica.server";
+import { requireSeccion } from "~/lib/clinica.server";
 import { useCloseOnSubmit } from "~/lib/hooks";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 import {
@@ -211,7 +211,7 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId } = await requireSeccion(request, 'cotizaciones');
 
   const [{ data: cotizaciones }, { data: pacientes }, { data: tratamientos }, { data: config }] =
     await Promise.all([
@@ -252,7 +252,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId } = await requireSeccion(request, 'cotizaciones');
   const fd = await request.formData();
   const intent = fd.get("intent") as string;
 

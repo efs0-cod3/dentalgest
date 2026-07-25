@@ -3,7 +3,7 @@ import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, redire
 import type { Route } from './+types/pacientes.$id'
 import type { action as citasAction } from './citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { buildPacienteData } from '~/lib/pacientes.server'
 import { getHorarioAgenda } from '~/lib/agenda.server'
 import {
@@ -70,7 +70,7 @@ export function meta({ data }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'pacientes')
   const pacienteId = params.id as string
 
   const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }, horario] = await Promise.all([
@@ -113,7 +113,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
 export async function action({ request, params }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'pacientes')
   const pacienteId = params.id as string
   const fd = await request.formData()
   const intent = fd.get('intent') as string

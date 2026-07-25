@@ -4,6 +4,7 @@ import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '~/lib/utils'
+import { puedeVer, type Seccion } from '~/lib/permisos'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed'
 
@@ -13,28 +14,31 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!user) return redirect('/login')
   const { data: perfil } = await supabase
     .from('perfiles')
-    .select('clinicas(nombre)')
+    .select('rol,clinicas(nombre)')
     .eq('id', user.id)
     .single()
   const clinicaNombre = (perfil?.clinicas as any)?.nombre ?? 'Nin Dental Clinic'
-  return { user, clinicaNombre }
+  return { user, clinicaNombre, rol: (perfil?.rol as string) ?? 'recepcionista' }
 }
 
-const nav = [
-  { to: '/dashboard', label: 'Inicio', icon: LayoutDashboard, end: true },
-  { to: '/dashboard/citas', label: 'Citas', icon: Calendar, end: false },
-  { to: '/dashboard/consultas', label: 'Consultas', icon: Stethoscope, end: false },
-  { to: '/dashboard/pacientes', label: 'Pacientes', icon: Users, end: false },
-  { to: '/dashboard/caja', label: 'Caja', icon: DollarSign, end: false },
-  { to: '/dashboard/cotizaciones', label: 'Cotizaciones', icon: FileText, end: false },
-  { to: '/dashboard/laboratorio', label: 'Laboratorio', icon: FlaskConical, end: false },
-  { to: '/dashboard/trabajos-externos', label: 'Trabajos externos', icon: Building2, end: false },
-  { to: '/dashboard/configuracion', label: 'Configuración', icon: Settings, end: false },
+const nav: { to: string; label: string; icon: any; end: boolean; seccion: Seccion }[] = [
+  { to: '/dashboard', label: 'Inicio', icon: LayoutDashboard, end: true, seccion: 'inicio' },
+  { to: '/dashboard/citas', label: 'Citas', icon: Calendar, end: false, seccion: 'citas' },
+  { to: '/dashboard/consultas', label: 'Consultas', icon: Stethoscope, end: false, seccion: 'consultas' },
+  { to: '/dashboard/pacientes', label: 'Pacientes', icon: Users, end: false, seccion: 'pacientes' },
+  { to: '/dashboard/caja', label: 'Caja', icon: DollarSign, end: false, seccion: 'caja' },
+  { to: '/dashboard/cotizaciones', label: 'Cotizaciones', icon: FileText, end: false, seccion: 'cotizaciones' },
+  { to: '/dashboard/laboratorio', label: 'Laboratorio', icon: FlaskConical, end: false, seccion: 'laboratorio' },
+  { to: '/dashboard/trabajos-externos', label: 'Trabajos externos', icon: Building2, end: false, seccion: 'trabajos-externos' },
+  { to: '/dashboard/configuracion', label: 'Configuración', icon: Settings, end: false, seccion: 'configuracion' },
 ]
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  // el menú solo muestra lo que el rol puede abrir (el bloqueo real está en
+  // el loader de cada ruta)
+  const navVisible = nav.filter(n => puedeVer(loaderData.rol, n.seccion))
 
   // restore preference after mount to avoid a server/client hydration mismatch
   // (localStorage isn't available during SSR)
@@ -58,7 +62,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         )}
       </div>
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-        {nav.map(({ to, label, icon: Icon, end }) => (
+        {navVisible.map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
@@ -163,7 +167,7 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
 
         {/* Mobile bottom nav */}
         <nav className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 flex z-30">
-          {nav.map(({ to, icon: Icon, label, end }) => (
+          {navVisible.map(({ to, icon: Icon, label, end }) => (
             <NavLink
               key={to}
               to={to}

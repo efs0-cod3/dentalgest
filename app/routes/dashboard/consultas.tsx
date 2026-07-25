@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { Form, useLoaderData, useNavigation, useSubmit, useActionData } from 'react-router'
 import type { Route } from './+types/consultas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
+import { filtroPropio } from '~/lib/permisos'
 import {
   Plus, X, Pencil, Trash2, Search, Eye, Download, Stethoscope, Calendar,
 } from 'lucide-react'
@@ -40,13 +41,17 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'consultas')
+  // el rol doctor solo ve las consultas que él registró
+  const soloPropias = filtroPropio(rol) && doctorId
 
   const [{ data: consultas }, { data: pacientes }, { data: doctores }] = await Promise.all([
-    supabase.from('expediente_entradas')
-      .select('id,fecha,tipo,titulo,descripcion,plan,paciente_id,doctor_id,pacientes(id,nombre,fecha_nacimiento,cedula),doctores(nombre)')
-      .eq('clinica_id', clinicaId)
-      .order('fecha', { ascending: false }),
+    (() => {
+      const q = supabase.from('expediente_entradas')
+        .select('id,fecha,tipo,titulo,descripcion,plan,paciente_id,doctor_id,pacientes(id,nombre,fecha_nacimiento,cedula),doctores(nombre)')
+        .eq('clinica_id', clinicaId)
+      return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha', { ascending: false })
+    })(),
     supabase.from('pacientes').select('id,nombre,fecha_nacimiento,cedula').eq('clinica_id', clinicaId).order('nombre'),
     supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
   ])
@@ -62,7 +67,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'consultas')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 

@@ -2,7 +2,7 @@ import { useLoaderData } from 'react-router'
 import { Link } from 'react-router'
 import type { Route } from './+types/index'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { TrendingUp, TrendingDown, Users, Calendar, Clock, ChevronRight, DollarSign } from 'lucide-react'
 import { cn, fmtMoney } from '~/lib/utils'
 
@@ -21,7 +21,7 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'inicio')
   const now = new Date()
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString()
   const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).toISOString()

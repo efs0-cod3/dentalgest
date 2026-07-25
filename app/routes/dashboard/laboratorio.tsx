@@ -3,7 +3,8 @@ import { createPortal } from "react-dom";
 import { useLoaderData, useFetcher } from "react-router";
 import type { Route } from "./+types/laboratorio";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
-import { getClinicaId } from "~/lib/clinica.server";
+import { requireSeccion } from "~/lib/clinica.server";
+import { filtroPropio, ocultaCostos } from "~/lib/permisos";
 import {
   Plus, X, Pencil, Trash2, Clock, CheckCircle, Package,
   AlertTriangle, FlaskConical, Calendar, Printer,
@@ -152,16 +153,30 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'laboratorio');
+
+  // el rol doctor solo ve sus órdenes. La orden guarda el doctor por nombre,
+  // no por id, así que se compara contra el nombre de su ficha.
+  let nombreDoctor: string | null = null;
+  if (filtroPropio(rol) && doctorId) {
+    const { data: doc } = await supabase
+      .from("doctores")
+      .select("nombre")
+      .eq("id", doctorId)
+      .maybeSingle();
+    nombreDoctor = (doc?.nombre as string) ?? null;
+  }
 
   const [{ data: ordenes }, { data: pacientes }] = await Promise.all([
-    supabase
-      .from("ordenes_laboratorio")
-      .select(
-        "id,clinica_id,paciente_id,titulo,laboratorio,tipo_trabajo,color_dental,doctor,fecha_solicitud,fecha_prometida,fecha_entrega,estado,notas,costo,created_at,pacientes(nombre)"
-      )
-      .eq("clinica_id", clinicaId)
-      .order("created_at", { ascending: false }),
+    (() => {
+      const q = supabase
+        .from("ordenes_laboratorio")
+        .select(
+          "id,clinica_id,paciente_id,titulo,laboratorio,tipo_trabajo,color_dental,doctor,fecha_solicitud,fecha_prometida,fecha_entrega,estado,notas,costo,created_at,pacientes(nombre)"
+        )
+        .eq("clinica_id", clinicaId);
+      return (nombreDoctor ? q.eq("doctor", nombreDoctor) : q).order("created_at", { ascending: false });
+    })(),
     supabase
       .from("pacientes")
       .select("id,nombre")
@@ -169,9 +184,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       .order("nombre"),
   ]);
 
+  const sinCostos = ocultaCostos(rol);
   return {
-    ordenes: (ordenes ?? []) as unknown as OrdenLaboratorio[],
+    // el rol laboratorio no ve importes: el costo no sale del servidor
+    ordenes: ((ordenes ?? []) as unknown as OrdenLaboratorio[]).map(o =>
+      sinCostos ? { ...o, costo: null } : o
+    ),
     pacientes: (pacientes ?? []) as Paciente[],
+    sinCostos,
   };
 }
 
@@ -179,7 +199,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId, rol } = await requireSeccion(request, 'laboratorio');
   const fd = await request.formData();
   const intent = fd.get("intent") as string;
 
@@ -219,7 +239,9 @@ export async function action({ request }: Route.ActionArgs) {
     fecha_solicitud: (fd.get("fecha_solicitud") as string) || new Date().toISOString().slice(0, 10),
     fecha_prometida: (fd.get("fecha_prometida") as string) || null,
     notas: (fd.get("notas") as string) || null,
-    costo: parseFloat(fd.get("costo") as string) || null,
+    // el rol laboratorio no ve ni edita importes: se omite el costo para no
+    // borrar el valor real al guardar
+    ...(ocultaCostos(rol) ? {} : { costo: parseFloat(fd.get("costo") as string) || null }),
   };
 
   if (intent === "create") {
@@ -265,10 +287,12 @@ const TIPOS_TRABAJO = [
 function OrdenFormModal({
   orden,
   pacientes,
+  sinCostos,
   onClose,
 }: {
   orden: OrdenLaboratorio | null;
   pacientes: Paciente[];
+  sinCostos: boolean;
   onClose: () => void;
 }) {
   const fetcher = useFetcher<typeof action>();
@@ -376,18 +400,20 @@ function OrdenFormModal({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Costo del laboratorio</label>
-                <input
-                  type="number"
-                  name="costo"
-                  min={0}
-                  step={1}
-                  defaultValue={orden?.costo ?? ""}
-                  placeholder="0"
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
+              {!sinCostos && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Costo del laboratorio</label>
+                  <input
+                    type="number"
+                    name="costo"
+                    min={0}
+                    step={1}
+                    defaultValue={orden?.costo ?? ""}
+                    placeholder="0"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Fecha de envío</label>
@@ -660,7 +686,7 @@ function OrdenCard({
 type FiltroEstado = "todas" | EstadoOrden;
 
 export default function Laboratorio({ loaderData }: Route.ComponentProps) {
-  const { ordenes, pacientes } = loaderData;
+  const { ordenes, pacientes, sinCostos } = loaderData;
   const [filtro, setFiltro] = useState<FiltroEstado>("todas");
   const [formModal, setFormModal] = useState<{ open: boolean; orden: OrdenLaboratorio | null }>({
     open: false,
@@ -759,6 +785,7 @@ export default function Laboratorio({ loaderData }: Route.ComponentProps) {
 
       {formModal.open && (
         <OrdenFormModal
+          sinCostos={sinCostos}
           orden={formModal.orden}
           pacientes={pacientes}
           onClose={() => setFormModal({ open: false, orden: null })}

@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { useLoaderData, useSearchParams, useNavigation, useSubmit, useFetcher } from 'react-router'
 import type { Route } from './+types/trabajos-externos'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
+import { ocultaCostos } from '~/lib/permisos'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import {
   Plus, X, Pencil, Trash2, Building2, Search, Phone, Mail,
@@ -90,7 +91,7 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId, rol } = await requireSeccion(request, 'trabajos-externos')
   const [{ data: perfilClinica }, { data: clientes }, { data: trabajos }, { data: facturas }, { data: config }] = await Promise.all([
     supabase.from('clinicas').select('nombre,rnc').eq('id', clinicaId).single(),
     supabase.from('clientes_externos').select('id,nombre,tipo,telefono,email,direccion,rnc,notas,created_at')
@@ -103,6 +104,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     ).eq('clinica_id', clinicaId).order('fecha_emision', { ascending: false }),
     supabase.from('config_clinica').select('recibo_whatsapp_habilitado').eq('clinica_id', clinicaId).maybeSingle(),
   ])
+  // el rol laboratorio no ve importes: ni precios de trabajos ni facturación
+  const sinCostos = ocultaCostos(rol)
   const facturasConSaldo: FacturaExterna[] = (facturas ?? []).map((f: any) => {
     const monto_pagado = (f.pagos_externos ?? []).reduce((s: number, p: any) => s + Number(p.monto), 0)
     const saldo = Math.max(0, Number(f.total) - monto_pagado)
@@ -114,9 +117,12 @@ export async function loader({ request }: Route.LoaderArgs) {
     clinicaNombre: perfilClinica?.nombre ?? 'Nin Dental Clinic',
     clinicaRnc: (perfilClinica?.rnc as string | null) ?? null,
     clientes: (clientes ?? []) as ClienteExterno[],
-    trabajos: (trabajos ?? []) as unknown as TrabajoExterno[],
-    facturas: facturasConSaldo,
+    trabajos: ((trabajos ?? []) as unknown as TrabajoExterno[]).map(t =>
+      sinCostos ? { ...t, precio: null } : t
+    ),
+    facturas: sinCostos ? [] : facturasConSaldo,
     whatsappHabilitado: config?.recibo_whatsapp_habilitado ?? true,
+    sinCostos,
   }
 }
 
@@ -124,7 +130,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'trabajos-externos')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 
@@ -1212,7 +1218,7 @@ function FacturaDetalleModal({ factura, trabajos, clienteTelefono, whatsappHabil
 type TabId = 'trabajos' | 'clientes' | 'facturas'
 
 export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
-  const { clinicaNombre, clinicaRnc, clientes, trabajos, facturas, whatsappHabilitado } = loaderData
+  const { clinicaNombre, clinicaRnc, clientes, trabajos, facturas, whatsappHabilitado, sinCostos } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'trabajos') as TabId
   function setTab(t: TabId) { setSearchParams(prev => { prev.set('tab', t); return prev }, { replace: true }) }
@@ -1264,7 +1270,8 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
   const tabs: { id: TabId; label: string; icon: any }[] = [
     { id: 'trabajos', label: `Trabajos (${trabajos.length})`, icon: Wrench },
     { id: 'clientes', label: `Clientes (${clientes.length})`, icon: Building2 },
-    { id: 'facturas', label: `Facturas (${facturas.length})`, icon: DollarSign },
+    // sin acceso a importes no hay pestaña de facturación
+    ...(sinCostos ? [] : [{ id: 'facturas' as TabId, label: `Facturas (${facturas.length})`, icon: DollarSign }]),
   ]
 
   return (

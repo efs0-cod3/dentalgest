@@ -1,10 +1,10 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { fetchTodosLosDatos } from '~/lib/exportarTodo.server'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'configuracion')
   const datos = await fetchTodosLosDatos(supabase, clinicaId)
 
   const payload = {

@@ -3,7 +3,7 @@ import { useSearchParams, useFetcher, Form } from 'react-router'
 import type { Route } from './+types/configuracion'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -24,7 +24,7 @@ type ClinicaData = {
 }
 type Doctor = { id: string; nombre: string; especialidad: string | null; color: string }
 type Tratamiento = { id: string; nombre: string; precio: number; duracion_min: number; color: string }
-type Perfil = { id: string; rol: string; email: string | null }
+type Perfil = { id: string; rol: string; email: string | null; doctor_id: string | null }
 type Config = {
   agenda_hora_inicio: string; agenda_hora_fin: string
   agenda_duracion_default_min: number; agenda_dias_laborables: number[]
@@ -44,7 +44,7 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'configuracion')
   // RLS en `perfiles` solo permite ver la fila propia; el listado del equipo
   // completo requiere el cliente admin (siempre filtrado por clinica_id)
   const admin = createSupabaseAdminClient()
@@ -54,7 +54,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion').eq('id', clinicaId).single(),
       supabase.from('doctores').select('id,nombre,especialidad,color').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,precio,duracion_min,color').eq('clinica_id', clinicaId).order('nombre'),
-      admin.from('perfiles').select('id,rol,email').eq('clinica_id', clinicaId),
+      admin.from('perfiles').select('id,rol,email,doctor_id').eq('clinica_id', clinicaId),
       supabase.from('config_clinica').select('*').eq('clinica_id', clinicaId).single(),
     ])
 
@@ -91,7 +91,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'configuracion')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 
@@ -269,6 +269,16 @@ export async function action({ request }: Route.ActionArgs) {
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
+  if (intent === 'update_doctor_vinculado') {
+    const gestor = await requireGestorEquipo()
+    if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin.from('perfiles')
+      .update({ doctor_id: (fd.get('doctor_id') as string) || null })
+      .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+  }
+
   if (intent === 'remove_user') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
@@ -453,7 +463,7 @@ function ClinicaSection({ clinica }: { clinica: ClinicaData | null }) {
 
 const ROLES = ['propietario', 'admin', 'recepcionista', 'doctor', 'laboratorio'] as const
 
-function UsuariosSection({ perfiles, clinicaNombre }: { perfiles: Perfil[]; clinicaNombre: string }) {
+function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perfil[]; doctores: Doctor[]; clinicaNombre: string }) {
   const f = useFetcher()
   const [inviting, setInviting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Perfil | null>(null)
@@ -486,6 +496,33 @@ function UsuariosSection({ perfiles, clinicaNombre }: { perfiles: Perfil[]; clin
                   className="text-xs text-gray-500 bg-transparent border-0 p-0 focus:outline-none cursor-pointer mt-0.5">
                   {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
+
+                {/* el rol doctor solo ve "lo suyo": hay que decir a qué ficha
+                    de doctor corresponde esta cuenta */}
+                {p.rol === 'doctor' && (
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <span className="text-xs text-gray-400">Ficha:</span>
+                    <select
+                      defaultValue={p.doctor_id ?? ''}
+                      onChange={e => {
+                        const fd = new FormData()
+                        fd.append('intent', 'update_doctor_vinculado')
+                        fd.append('id', p.id)
+                        fd.append('doctor_id', e.target.value)
+                        f.submit(fd, { method: 'post' })
+                      }}
+                      className={cn(
+                        'text-xs bg-white border rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500',
+                        p.doctor_id ? 'text-gray-600 border-gray-200' : 'text-amber-700 border-amber-300 bg-amber-50',
+                      )}>
+                      <option value="">— Sin vincular —</option>
+                      {doctores.map(d => <option key={d.id} value={d.id}>{d.nombre}</option>)}
+                    </select>
+                    {!p.doctor_id && (
+                      <span className="text-xs text-amber-600">Sin vincular no verá citas ni pacientes</span>
+                    )}
+                  </div>
+                )}
               </div>
               <button type="button" onClick={() => setDeleteTarget(p)}
                 className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
@@ -1230,7 +1267,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
       <div className="flex-1 overflow-auto p-4 md:p-6">
         <div className="max-w-2xl space-y-4">
           {tab === 'clinica' && <ClinicaSection clinica={clinica} />}
-          {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
+          {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} doctores={doctores} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'doctores' && <DoctoresSection doctores={doctores} />}
           {tab === 'tratamientos' && <TratamientosSection tratamientos={tratamientos} />}
           {tab === 'agenda' && <AgendaSection config={config} />}
