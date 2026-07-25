@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
+import { WhatsappEnviar } from '~/components/WhatsappEnviar'
 import { buildTrabajoHtml, buildFacturaExternaHtml } from '~/lib/trabajoExterno'
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -90,7 +91,7 @@ export function meta(): Route.MetaDescriptors {
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   const clinicaId = await getClinicaId(request)
-  const [{ data: perfilClinica }, { data: clientes }, { data: trabajos }, { data: facturas }] = await Promise.all([
+  const [{ data: perfilClinica }, { data: clientes }, { data: trabajos }, { data: facturas }, { data: config }] = await Promise.all([
     supabase.from('clinicas').select('nombre,rnc').eq('id', clinicaId).single(),
     supabase.from('clientes_externos').select('id,nombre,tipo,telefono,email,direccion,rnc,notas,created_at')
       .eq('clinica_id', clinicaId).order('nombre'),
@@ -100,6 +101,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     supabase.from('facturas_externas').select(
       'id,cliente_externo_id,periodo_inicio,periodo_fin,total,estado,fecha_emision,fecha_pago,fecha_vencimiento,verification_token,clientes_externos(nombre),pagos_externos(monto)'
     ).eq('clinica_id', clinicaId).order('fecha_emision', { ascending: false }),
+    supabase.from('config_clinica').select('recibo_whatsapp_habilitado').eq('clinica_id', clinicaId).maybeSingle(),
   ])
   const facturasConSaldo: FacturaExterna[] = (facturas ?? []).map((f: any) => {
     const monto_pagado = (f.pagos_externos ?? []).reduce((s: number, p: any) => s + Number(p.monto), 0)
@@ -114,6 +116,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     clientes: (clientes ?? []) as ClienteExterno[],
     trabajos: (trabajos ?? []) as unknown as TrabajoExterno[],
     facturas: facturasConSaldo,
+    whatsappHabilitado: config?.recibo_whatsapp_habilitado ?? true,
   }
 }
 
@@ -730,14 +733,27 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
 
 // ─── trabajo detalle modal ──────────────────────────────────────────────────────
 
-function TrabajoDetalleModal({ trabajo, clinicaNombre, onClose, onEdit }: {
-  trabajo: TrabajoExterno; clinicaNombre: string; onClose: () => void; onEdit: () => void
+function TrabajoDetalleModal({ trabajo, clienteTelefono, whatsappHabilitado, clinicaNombre, onClose, onEdit }: {
+  trabajo: TrabajoExterno; clienteTelefono: string | null; whatsappHabilitado: boolean
+  clinicaNombre: string; onClose: () => void; onEdit: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const navigation = useNavigation()
   const submit = useSubmit()
   useCloseOnSubmit(() => { setConfirmDelete(false); onClose() })
   const { label, color, Icon } = estadoTrabajoConfig[trabajo.estado]
+
+  // mensaje de WhatsApp con el estado del trabajo y su enlace de seguimiento
+  const mensajeWa =
+    `Hola${trabajo.clientes_externos?.nombre ? ` ${trabajo.clientes_externos.nombre}` : ''}, ` +
+    `le saluda ${clinicaNombre}. Estado de su trabajo: ${trabajo.tipo_trabajo}` +
+    (trabajo.paciente_referencia ? ` (paciente ${trabajo.paciente_referencia})` : '') +
+    ` — ${label}.` +
+    (trabajo.fecha_prometida && trabajo.estado !== 'entregado'
+      ? ` Fecha prometida: ${fmtDate(trabajo.fecha_prometida)}.`
+      : '') +
+    (trabajo.precio ? ` Precio: ${fmtMoney(Number(trabajo.precio))}.` : '') +
+    ` Puede ver el detalle aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/verificar-trabajo/${trabajo.id}?token=${trabajo.verification_token}`
 
   async function handlePrint() {
     const w = window.open('', '_blank', 'width=600,height=800')
@@ -822,10 +838,18 @@ function TrabajoDetalleModal({ trabajo, clinicaNombre, onClose, onEdit }: {
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+        <div className="px-6 py-4 border-t border-gray-100 flex flex-wrap justify-end gap-2 flex-shrink-0">
           <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <Printer size={13} /> Imprimir ficha
           </button>
+          {whatsappHabilitado && (
+            <WhatsappEnviar
+              telefono={clienteTelefono}
+              mensaje={mensajeWa}
+              etiqueta="WhatsApp"
+              ayuda="Se abre WhatsApp con el estado del trabajo y su enlace de seguimiento — solo pulsa enviar."
+            />
+          )}
           <button onClick={() => setConfirmDelete(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors">
             <Trash2 size={13} /> Eliminar
@@ -1057,8 +1081,10 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
 
 // ─── factura detalle modal ──────────────────────────────────────────────────────
 
-function FacturaDetalleModal({ factura, trabajos, clinicaNombre, clinicaRnc, onClose }: {
-  factura: FacturaExterna; trabajos: TrabajoExterno[]; clinicaNombre: string; clinicaRnc: string | null; onClose: () => void
+function FacturaDetalleModal({ factura, trabajos, clienteTelefono, whatsappHabilitado, clinicaNombre, clinicaRnc, onClose }: {
+  factura: FacturaExterna; trabajos: TrabajoExterno[]; clienteTelefono: string | null
+  whatsappHabilitado: boolean
+  clinicaNombre: string; clinicaRnc: string | null; onClose: () => void
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [abonoModal, setAbonoModal] = useState(false)
@@ -1067,6 +1093,20 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, clinicaRnc, onC
   useCloseOnSubmit(() => { setConfirmDelete(false); onClose() })
   const trabajosFactura = trabajos.filter(t => t.factura_id === factura.id)
   const { label, color } = estadoFacturaConfig[factura.estado]
+
+  // mensaje de WhatsApp con el resumen de la factura y su enlace verificable
+  const mensajeWa =
+    `Hola${factura.clientes_externos?.nombre ? ` ${factura.clientes_externos.nombre}` : ''}, ` +
+    `le saluda ${clinicaNombre}. Factura #${factura.id.slice(-8).toUpperCase()} ` +
+    `del ${fmtDate(factura.periodo_inicio)} al ${fmtDate(factura.periodo_fin)}: ` +
+    `total ${fmtMoney(Number(factura.total))}` +
+    (factura.saldo > 0
+      ? `, saldo pendiente ${fmtMoney(factura.saldo)}.`
+      : ' — pagada, ¡gracias!') +
+    (factura.fecha_vencimiento && factura.saldo > 0
+      ? ` Vence el ${fmtDate(factura.fecha_vencimiento)}.`
+      : '') +
+    ` Puede verla y verificarla aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/verificar-factura/${factura.id}?token=${factura.verification_token}`
 
   async function handlePrint() {
     const w = window.open('', '_blank', 'width=760,height=900')
@@ -1123,10 +1163,18 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, clinicaRnc, onC
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-2 flex-shrink-0">
+        <div className="px-6 py-4 border-t border-gray-100 flex flex-wrap justify-end gap-2 flex-shrink-0">
           <button onClick={handlePrint} className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
             <Printer size={13} /> Imprimir
           </button>
+          {whatsappHabilitado && (
+            <WhatsappEnviar
+              telefono={clienteTelefono}
+              mensaje={mensajeWa}
+              etiqueta="WhatsApp"
+              ayuda="Se abre WhatsApp con el resumen de la factura y su enlace verificable — solo pulsa enviar."
+            />
+          )}
           {factura.estado !== 'pagada' && (
             <button onClick={() => setAbonoModal(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors">
@@ -1164,7 +1212,7 @@ function FacturaDetalleModal({ factura, trabajos, clinicaNombre, clinicaRnc, onC
 type TabId = 'trabajos' | 'clientes' | 'facturas'
 
 export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
-  const { clinicaNombre, clinicaRnc, clientes, trabajos, facturas } = loaderData
+  const { clinicaNombre, clinicaRnc, clientes, trabajos, facturas, whatsappHabilitado } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'trabajos') as TabId
   function setTab(t: TabId) { setSearchParams(prev => { prev.set('tab', t); return prev }, { replace: true }) }
@@ -1380,7 +1428,10 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
           onEdit={() => { setClienteModal({ open: true, cliente: clienteDetalle }); setClienteDetalle(null) }} />
       )}
       {facturaDetalle && (
-        <FacturaDetalleModal factura={facturaDetalle} trabajos={trabajos} clinicaNombre={clinicaNombre} clinicaRnc={clinicaRnc}
+        <FacturaDetalleModal factura={facturaDetalle} trabajos={trabajos}
+          clienteTelefono={clientes.find(c => c.id === facturaDetalle.cliente_externo_id)?.telefono ?? null}
+          whatsappHabilitado={whatsappHabilitado}
+          clinicaNombre={clinicaNombre} clinicaRnc={clinicaRnc}
           onClose={() => setFacturaDetalle(null)} />
       )}
       {generarFacturaCliente && (
@@ -1389,6 +1440,8 @@ export default function TrabajosExternos({ loaderData }: Route.ComponentProps) {
       )}
       {trabajoDetalle && (
         <TrabajoDetalleModal trabajo={trabajoDetalle} clinicaNombre={clinicaNombre}
+          clienteTelefono={clientes.find(c => c.id === trabajoDetalle.cliente_externo_id)?.telefono ?? null}
+          whatsappHabilitado={whatsappHabilitado}
           onClose={() => setTrabajoDetalle(null)}
           onEdit={() => { setTrabajoModal({ open: true, trabajo: trabajoDetalle }); setTrabajoDetalle(null) }} />
       )}
