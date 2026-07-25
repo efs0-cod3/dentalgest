@@ -822,17 +822,17 @@ function NotificacionesSection({ config, resendEstado }: { config: Config; resen
   const correoListo = resendEstado.tieneApiKey && !resendEstado.remitentePrueba
   return (
     <div className="space-y-4">
-      <SectionCard title="Envío de recibos" description="Botones disponibles al abrir el recibo de un movimiento en Caja">
+      <SectionCard title="Envío de documentos" description="Botones disponibles al enviar recibos, fichas de trabajo y facturas">
         <fEnvio.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="update_envio_recibos" />
 
           <div className="divide-y divide-gray-100">
             <Toggle name="recibo_email_habilitado" defaultChecked={config.recibo_email_habilitado}
               label="Enviar por correo"
-              description="Muestra el botón Correo en el recibo (requiere Resend configurado)" />
+              description="Muestra el botón Correo en el recibo de Caja (requiere Resend configurado)" />
             <Toggle name="recibo_whatsapp_habilitado" defaultChecked={config.recibo_whatsapp_habilitado}
               label="Enviar por WhatsApp"
-              description="Muestra el botón WhatsApp: abre el chat con el enlace del recibo listo para enviar" />
+              description="Muestra el botón WhatsApp en recibos de Caja, fichas de trabajo y facturas externas" />
           </div>
 
           {/* estado real del proveedor de correo — recordatorio de lo que falta */}
