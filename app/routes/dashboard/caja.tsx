@@ -152,7 +152,11 @@ export async function loader({ request }: Route.LoaderArgs) {
       .eq("clinica_id", clinicaId)
       .order("created_at", { ascending: false }),
     supabase.from("clinicas").select("nombre,rnc").eq("id", clinicaId).single(),
-    supabase.from("config_clinica").select("caja_multimoneda,caja_tasa_usd").eq("clinica_id", clinicaId).maybeSingle(),
+    supabase
+      .from("config_clinica")
+      .select("caja_multimoneda,caja_tasa_usd,recibo_email_habilitado,recibo_whatsapp_habilitado")
+      .eq("clinica_id", clinicaId)
+      .maybeSingle(),
   ]);
 
   const deudas: Deuda[] = (deudasRaw ?? []).map((d: any) => {
@@ -181,6 +185,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     clinicaRnc: (clinicaData?.rnc as string | null) ?? null,
     multimoneda: config?.caja_multimoneda ?? false,
     tasaUsd: (config?.caja_tasa_usd as number | null) ?? null,
+    reciboEmail: config?.recibo_email_habilitado ?? true,
+    reciboWhatsapp: config?.recibo_whatsapp_habilitado ?? true,
   };
 }
 
@@ -1595,12 +1601,16 @@ function ReciboModal({
   onClose,
   clinicaNombre,
   clinicaRnc,
+  emailHabilitado,
+  whatsappHabilitado,
 }: {
   pago: Pago;
   deuda?: DeudaRecibo | null;
   onClose: () => void;
   clinicaNombre: string;
   clinicaRnc: string | null;
+  emailHabilitado: boolean;
+  whatsappHabilitado: boolean;
 }) {
   const [showEmail, setShowEmail] = useState(false);
   const [showWhatsapp, setShowWhatsapp] = useState(false);
@@ -1757,38 +1767,42 @@ function ReciboModal({
             >
               <Printer size={14} /> Imprimir
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowEmail((v) => !v);
-                setShowWhatsapp(false);
-                setStatus("idle");
-              }}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors",
-                showEmail
-                  ? "bg-blue-600 text-white border-blue-600"
-                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
-              )}
-            >
-              <Mail size={14} /> Correo
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setShowWhatsapp((v) => !v);
-                setShowEmail(false);
-                setStatus("idle");
-              }}
-              className={cn(
-                "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors",
-                showWhatsapp
-                  ? "bg-green-600 text-white border-green-600"
-                  : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
-              )}
-            >
-              <MessageCircle size={14} /> WhatsApp
-            </button>
+            {emailHabilitado && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowEmail((v) => !v);
+                  setShowWhatsapp(false);
+                  setStatus("idle");
+                }}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors",
+                  showEmail
+                    ? "bg-blue-600 text-white border-blue-600"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
+                )}
+              >
+                <Mail size={14} /> Correo
+              </button>
+            )}
+            {whatsappHabilitado && (
+              <button
+                type="button"
+                onClick={() => {
+                  setShowWhatsapp((v) => !v);
+                  setShowEmail(false);
+                  setStatus("idle");
+                }}
+                className={cn(
+                  "flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-xl border transition-colors",
+                  showWhatsapp
+                    ? "bg-green-600 text-white border-green-600"
+                    : "bg-white text-gray-700 border-gray-200 hover:bg-gray-50",
+                )}
+              >
+                <MessageCircle size={14} /> WhatsApp
+              </button>
+            )}
           </div>
 
           {/* whatsapp section */}
@@ -1897,7 +1911,7 @@ function ReciboModal({
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function Caja() {
-  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre, clinicaRnc, multimoneda, tasaUsd } =
+  const { pagos, pacientes, citas, tratamientos, deudas, clinicaNombre, clinicaRnc, multimoneda, tasaUsd, reciboEmail, reciboWhatsapp } =
     useLoaderData<typeof loader>();
   const [tipoFilter, setTipoFilter] = useState("todos");
   const [deudaTab, setDeudaTab] = useState<"pendiente" | "liquidada">(
@@ -2323,6 +2337,8 @@ export default function Caja() {
           onClose={() => setReciboModal(null)}
           clinicaNombre={clinicaNombre}
           clinicaRnc={clinicaRnc}
+          emailHabilitado={reciboEmail}
+          whatsappHabilitado={reciboWhatsapp}
         />
       )}
       {editModal.open && (

@@ -30,6 +30,7 @@ type Config = {
   agenda_citas_simultaneas: boolean; caja_moneda: string
   caja_itbis: boolean; caja_auto_ingreso: boolean; notif_lab_alerta_dias: number
   caja_multimoneda: boolean; caja_tasa_usd: number | null
+  recibo_email_habilitado: boolean; recibo_whatsapp_habilitado: boolean
 }
 
 // ─── meta ─────────────────────────────────────────────────────────────────────
@@ -62,6 +63,16 @@ export async function loader({ request }: Route.LoaderArgs) {
     agenda_citas_simultaneas: false, caja_moneda: 'DOP',
     caja_itbis: false, caja_auto_ingreso: false, notif_lab_alerta_dias: 2,
     caja_multimoneda: false, caja_tasa_usd: null,
+    recibo_email_habilitado: true, recibo_whatsapp_habilitado: true,
+  }
+
+  // estado real del proveedor de correo, para avisar en Configuración si el
+  // envío de recibos por email aún no puede llegar a cualquier destinatario
+  const fromEmail = process.env.RESEND_FROM_EMAIL ?? ''
+  const resendEstado = {
+    tieneApiKey: !!process.env.RESEND_API_KEY,
+    remitentePrueba: !fromEmail || fromEmail.includes('onboarding@resend.dev'),
+    remitente: fromEmail || null,
   }
 
   return {
@@ -71,6 +82,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     perfiles: (perfiles ?? []) as Perfil[],
     config: (config ? { ...defaultConfig, ...config } : defaultConfig) as Config,
     clinicaId,
+    resendEstado,
   }
 }
 
@@ -247,6 +259,16 @@ export async function action({ request }: Route.ActionArgs) {
     await ensureConfig()
     const { error } = await supabase.from('config_clinica').update({
       notif_lab_alerta_dias: parseInt(fd.get('notif_lab_alerta_dias') as string) || 2,
+    }).eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+  }
+
+  // Envío de recibos: qué botones se muestran en el recibo de un movimiento
+  if (intent === 'update_envio_recibos') {
+    await ensureConfig()
+    const { error } = await supabase.from('config_clinica').update({
+      recibo_email_habilitado: fd.get('recibo_email_habilitado') === 'true',
+      recibo_whatsapp_habilitado: fd.get('recibo_whatsapp_habilitado') === 'true',
     }).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
@@ -792,10 +814,58 @@ function AgendaSection({ config }: { config: Config }) {
 
 // ─── section: Notificaciones ──────────────────────────────────────────────────
 
-function NotificacionesSection({ config }: { config: Config }) {
+type ResendEstado = { tieneApiKey: boolean; remitentePrueba: boolean; remitente: string | null }
+
+function NotificacionesSection({ config, resendEstado }: { config: Config; resendEstado: ResendEstado }) {
   const f = useFetcher()
+  const fEnvio = useFetcher()
+  const correoListo = resendEstado.tieneApiKey && !resendEstado.remitentePrueba
   return (
     <div className="space-y-4">
+      <SectionCard title="Envío de recibos" description="Botones disponibles al abrir el recibo de un movimiento en Caja">
+        <fEnvio.Form method="post" className="space-y-4">
+          <input type="hidden" name="intent" value="update_envio_recibos" />
+
+          <div className="divide-y divide-gray-100">
+            <Toggle name="recibo_email_habilitado" defaultChecked={config.recibo_email_habilitado}
+              label="Enviar por correo"
+              description="Muestra el botón Correo en el recibo (requiere Resend configurado)" />
+            <Toggle name="recibo_whatsapp_habilitado" defaultChecked={config.recibo_whatsapp_habilitado}
+              label="Enviar por WhatsApp"
+              description="Muestra el botón WhatsApp: abre el chat con el enlace del recibo listo para enviar" />
+          </div>
+
+          {/* estado real del proveedor de correo — recordatorio de lo que falta */}
+          <div className={cn(
+            'rounded-lg border px-3 py-2.5 text-xs',
+            correoListo ? 'bg-green-50 border-green-100 text-green-800' : 'bg-amber-50 border-amber-100 text-amber-900'
+          )}>
+            {!resendEstado.tieneApiKey ? (
+              <p>
+                <strong>Correo no configurado.</strong> Falta la clave <code className="font-mono">RESEND_API_KEY</code> en
+                el servidor. Mientras no esté, el envío por correo fallará — conviene dejar ese botón apagado.
+              </p>
+            ) : resendEstado.remitentePrueba ? (
+              <p>
+                <strong>Correo en modo de prueba.</strong> Se está usando el remitente de prueba de Resend, que solo
+                entrega a tu propia dirección. Para enviar a pacientes: verifica un dominio en Resend y define{' '}
+                <code className="font-mono">RESEND_FROM_EMAIL</code> con una dirección de ese dominio.
+              </p>
+            ) : (
+              <p>
+                <strong>Correo listo.</strong> Remitente: <code className="font-mono">{resendEstado.remitente}</code>.
+                Las respuestas llegan al email de la clínica configurado en la pestaña Clínica.
+              </p>
+            )}
+          </div>
+
+          <div className="flex items-center gap-3 pt-1">
+            <SaveBtn loading={fEnvio.state !== 'idle'} />
+            <FeedbackMsg data={fEnvio.data} />
+          </div>
+        </fEnvio.Form>
+      </SectionCard>
+
       <SectionCard title="Alertas de laboratorio" description="Aviso cuando una orden no llegará a tiempo para la cita del paciente">
         <f.Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="update_notificaciones" />
@@ -817,8 +887,21 @@ function NotificacionesSection({ config }: { config: Config }) {
         </f.Form>
       </SectionCard>
 
-      <SectionCard title="Notificaciones por WhatsApp">
-        <p className="text-sm text-gray-500">Próximamente — recordatorios automáticos a pacientes vía WhatsApp Business.</p>
+      <SectionCard title="Notificaciones automáticas por WhatsApp">
+        <div className="space-y-3">
+          <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">No disponible aún</p>
+            <p className="text-sm text-gray-600">
+              Los recordatorios <strong>automáticos</strong> a pacientes (sin intervención del personal) requieren la
+              API de WhatsApp Business: cuenta de Meta Business, número dedicado y plantillas aprobadas por Meta, con
+              costo por conversación.
+            </p>
+          </div>
+          <p className="text-xs text-gray-500">
+            El envío <strong>manual</strong> sí está disponible hoy: el botón WhatsApp del recibo abre el chat con el
+            mensaje y el enlace listos, y solo hay que pulsar enviar. No requiere configuración.
+          </p>
+        </div>
       </SectionCard>
     </div>
   )
@@ -978,7 +1061,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Configuracion({ loaderData }: Route.ComponentProps) {
-  const { clinica, doctores, tratamientos, perfiles, config } = loaderData
+  const { clinica, doctores, tratamientos, perfiles, config, resendEstado } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'clinica') as TabId
 
@@ -1033,7 +1116,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
           {tab === 'doctores' && <DoctoresSection doctores={doctores} />}
           {tab === 'tratamientos' && <TratamientosSection tratamientos={tratamientos} />}
           {tab === 'agenda' && <AgendaSection config={config} />}
-          {tab === 'notificaciones' && <NotificacionesSection config={config} />}
+          {tab === 'notificaciones' && <NotificacionesSection config={config} resendEstado={resendEstado} />}
           {tab === 'caja' && <CajaSection config={config} />}
           {tab === 'peligro' && <PeligroSection />}
         </div>
