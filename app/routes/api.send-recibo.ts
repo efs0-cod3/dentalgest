@@ -1,11 +1,11 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { buildReciboHtml } from '~/lib/recibo'
 import type { DeudaRecibo, ReciboHtmlPago } from '~/lib/recibo'
 
 export async function action({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'caja')
   const fd = await request.formData()
   const pagoId = fd.get('pago_id') as string
   const email = fd.get('email') as string

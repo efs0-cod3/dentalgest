@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Form, useLoaderData, useNavigation, useFetcher, useSubmit, useActionData } from "react-router";
 import type { Route } from "./+types/caja";
 import { createSupabaseServerClient } from "~/lib/supabase.server";
-import { getClinicaId } from "~/lib/clinica.server";
+import { requireSeccion } from "~/lib/clinica.server";
 import { useCloseOnSubmit } from "~/lib/hooks";
 import {
   Plus,
@@ -110,7 +110,7 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId } = await requireSeccion(request, 'caja');
 
   const [
     { data: pagos },
@@ -218,7 +218,7 @@ async function recalcularEstadoDeuda(
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request);
-  const clinicaId = await getClinicaId(request);
+  const { clinicaId } = await requireSeccion(request, 'caja');
   const fd = await request.formData();
   const intent = fd.get("intent") as string;
 

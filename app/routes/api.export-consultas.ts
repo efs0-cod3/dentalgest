@@ -1,11 +1,11 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { rowsToCsv } from '~/lib/csv'
 import { calcularEdad } from '~/lib/utils'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'consultas')
   const url = new URL(request.url)
   const tipo = url.searchParams.get('tipo')
   const pacienteId = url.searchParams.get('paciente_id')

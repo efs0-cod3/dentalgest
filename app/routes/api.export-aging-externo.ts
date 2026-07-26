@@ -1,10 +1,10 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
 import { csvEscape } from '~/lib/csv'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'caja')
 
   const { data: facturas } = await supabase
     .from('facturas_externas')

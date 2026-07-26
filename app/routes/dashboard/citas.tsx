@@ -2,7 +2,8 @@ import { useState, useMemo, useEffect, useRef } from 'react'
 import { Form, useLoaderData, useSearchParams, useNavigation, useSubmit, useActionData, useFetcher } from 'react-router'
 import type { Route } from './+types/citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { getClinicaId } from '~/lib/clinica.server'
+import { requireSeccion } from '~/lib/clinica.server'
+import { filtroPropio } from '~/lib/permisos'
 import { getHorarioAgenda } from '~/lib/agenda.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
 import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal } from '~/lib/utils'
@@ -32,14 +33,18 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'citas')
+  // el rol doctor solo ve su propia agenda
+  const soloPropias = filtroPropio(rol) && doctorId
   const [{ data: citas }, { data: pacientes }, { data: doctores }, { data: tratamientos }, horario] =
     await Promise.all([
-      supabase
-        .from('citas')
-        .select('id,fecha_hora,duracion_min,estado,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
-        .eq('clinica_id', clinicaId)
-        .order('fecha_hora', { ascending: true }),
+      (() => {
+        const q = supabase
+          .from('citas')
+          .select('id,fecha_hora,duracion_min,estado,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
+          .eq('clinica_id', clinicaId)
+        return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha_hora', { ascending: true })
+      })(),
       supabase.from('pacientes').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
@@ -61,7 +66,7 @@ function horaAMinutos(hhmm: string) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const clinicaId = await getClinicaId(request)
+  const { clinicaId } = await requireSeccion(request, 'citas')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 
