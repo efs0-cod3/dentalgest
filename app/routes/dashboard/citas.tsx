@@ -5,10 +5,11 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { filtroPropio } from '~/lib/permisos'
 import { getHorarioAgenda } from '~/lib/agenda.server'
-import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
+import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp, MessageCircle } from 'lucide-react'
 import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
+import { abrirWhatsapp } from '~/components/WhatsappEnviar'
 
 type Cita = {
   id: string
@@ -20,7 +21,7 @@ type Cita = {
   paciente_id: string | null
   doctor_id: string | null
   tratamiento_id: string | null
-  pacientes: { nombre: string } | null
+  pacientes: { nombre: string; telefono: string | null } | null
   doctores: { nombre: string } | null
   tratamientos: { nombre: string } | null
 }
@@ -42,7 +43,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       (() => {
         const q = supabase
           .from('citas')
-          .select('id,fecha_hora,duracion_min,estado,origen,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
+          .select('id,fecha_hora,duracion_min,estado,origen,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre,telefono),doctores(nombre),tratamientos(nombre)')
           .eq('clinica_id', clinicaId)
         return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha_hora', { ascending: true })
       })(),
@@ -51,12 +52,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
       getHorarioAgenda(supabase, clinicaId),
     ])
+  const { data: clinica } = await supabase.from('clinicas').select('nombre').eq('id', clinicaId).single()
   return {
     citas: (citas ?? []) as unknown as Cita[],
     pacientes: (pacientes ?? []) as Paciente[],
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
     horario,
+    clinicaNombre: clinica?.nombre ?? 'la clínica',
   }
 }
 
@@ -415,12 +418,18 @@ function CitaDetalleModal({
 
 // ─── edit modal ───────────────────────────────────────────────────────────────
 
+function fmtFechaHoraWa(fecha: string, hora: string) {
+  const d = new Date(`${fecha}T${hora}:00`)
+  return d.toLocaleString('es-DO', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+}
+
 function CitaModal({
   cita,
   pacientes,
   doctores,
   tratamientos,
   horario,
+  clinicaNombre,
   onClose,
 }: {
   cita: Cita | null
@@ -428,6 +437,7 @@ function CitaModal({
   doctores: Doctor[]
   tratamientos: Tratamiento[]
   horario: { inicio: string; fin: string }
+  clinicaNombre: string
   onClose: () => void
 }) {
   const navigation = useNavigation()
@@ -611,7 +621,26 @@ function CitaModal({
             <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{actionData.error}</p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex items-center justify-between gap-2 pt-2">
+            {/* avisar/confirmar al paciente por WhatsApp (solo citas existentes
+                con teléfono) — abre el chat con el mensaje listo */}
+            {cita?.pacientes?.telefono ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const f = fechaDate && fechaTime ? fmtFechaHoraWa(fechaDate, fechaTime) : ''
+                  const msg =
+                    `Hola${cita.pacientes?.nombre ? ' ' + cita.pacientes.nombre : ''}, le saluda ${clinicaNombre}. ` +
+                    `Le confirmamos su cita${f ? ` para el ${f}` : ''}. ¡Le esperamos! ` +
+                    `Si necesita reprogramar, escríbanos por aquí.`
+                  abrirWhatsapp(cita.pacientes!.telefono!, msg)
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+              >
+                <MessageCircle size={14} /> Confirmar por WhatsApp
+              </button>
+            ) : <span />}
+            <div className="flex gap-2">
             <button
               type="button"
               onClick={onClose}
@@ -626,6 +655,7 @@ function CitaModal({
             >
               {isSubmitting ? 'Guardando…' : 'Guardar'}
             </button>
+            </div>
           </div>
         </Form>
       </div>
@@ -975,7 +1005,7 @@ function CalendarView({
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function Citas() {
-  const { citas, pacientes, doctores, tratamientos, horario } = useLoaderData<typeof loader>()
+  const { citas, pacientes, doctores, tratamientos, horario, clinicaNombre } = useLoaderData<typeof loader>()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const view = searchParams.get('view') ?? 'tabla'
@@ -1261,6 +1291,7 @@ export default function Citas() {
           doctores={doctores}
           tratamientos={tratamientos}
           horario={horario}
+          clinicaNombre={clinicaNombre}
           onClose={() => setModal({ open: false, cita: null })}
         />
       )}

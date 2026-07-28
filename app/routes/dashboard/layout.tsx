@@ -5,6 +5,7 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
+import { NotificationBell, type Reserva } from '~/components/NotificationBell'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed'
 
@@ -14,11 +15,34 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!user) return redirect('/login')
   const { data: perfil } = await supabase
     .from('perfiles')
-    .select('rol,clinicas(nombre)')
+    .select('rol,clinica_id,clinicas(nombre)')
     .eq('id', user.id)
     .single()
   const clinicaNombre = (perfil?.clinicas as any)?.nombre ?? 'Nin Dental Clinic'
-  return { user, clinicaNombre, rol: (perfil?.rol as string) ?? 'recepcionista' }
+  const rol = (perfil?.rol as string) ?? 'recepcionista'
+
+  // reservas en línea pendientes → alertas de la campana (solo quien gestiona
+  // el frente: propietario, admin, recepcionista)
+  let reservas: Reserva[] = []
+  if (perfil?.clinica_id && ['propietario', 'admin', 'recepcionista'].includes(rol)) {
+    const { data } = await supabase
+      .from('citas')
+      .select('id,fecha_hora,pacientes(nombre,telefono)')
+      .eq('clinica_id', perfil.clinica_id)
+      .eq('estado', 'pendiente')
+      .eq('origen', 'reserva')
+      .gte('fecha_hora', new Date().toISOString())
+      .order('fecha_hora', { ascending: true })
+      .limit(20)
+    reservas = (data ?? []).map((c: any) => ({
+      id: c.id as string,
+      fecha_hora: c.fecha_hora as string,
+      nombre: (c.pacientes?.nombre as string) ?? null,
+      telefono: (c.pacientes?.telefono as string) ?? null,
+    }))
+  }
+
+  return { user, clinicaNombre, rol, reservas }
 }
 
 const nav: { to: string; label: string; icon: any; end: boolean; seccion: Seccion }[] = [
@@ -39,6 +63,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   // el menú solo muestra lo que el rol puede abrir (el bloqueo real está en
   // el loader de cada ruta)
   const navVisible = nav.filter(n => puedeVer(loaderData.rol, n.seccion))
+  // la campana de reservas solo para quien gestiona el frente
+  const verNotif = ['propietario', 'admin', 'recepcionista'].includes(loaderData.rol)
 
   // restore preference after mount to avoid a server/client hydration mismatch
   // (localStorage isn't available during SSR)
@@ -158,7 +184,19 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
           </button>
           <img src="/ninlogo.png" alt="Logo" className="h-7 w-auto" />
           <span className="font-semibold text-gray-900 text-sm truncate">{loaderData.clinicaNombre}</span>
+          {verNotif && (
+            <div className="ml-auto">
+              <NotificationBell reservas={loaderData.reservas} clinicaNombre={loaderData.clinicaNombre} />
+            </div>
+          )}
         </header>
+
+        {/* Desktop top bar (solo con la campana) */}
+        {verNotif && (
+          <header className="hidden md:flex items-center justify-end px-6 h-14 bg-white border-b border-gray-200 flex-shrink-0 z-20">
+            <NotificationBell reservas={loaderData.reservas} clinicaNombre={loaderData.clinicaNombre} />
+          </header>
+        )}
 
         {/* Page content */}
         <main className="flex-1 overflow-auto pb-16 md:pb-0">
