@@ -32,6 +32,7 @@ type Config = {
   caja_itbis: boolean; caja_auto_ingreso: boolean; notif_lab_alerta_dias: number
   caja_multimoneda: boolean; caja_tasa_usd: number | null
   recibo_email_habilitado: boolean; recibo_whatsapp_habilitado: boolean
+  reservas_habilitado: boolean; reserva_token: string | null
 }
 
 // ─── meta ─────────────────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     caja_itbis: false, caja_auto_ingreso: false, notif_lab_alerta_dias: 2,
     caja_multimoneda: false, caja_tasa_usd: null,
     recibo_email_habilitado: true, recibo_whatsapp_habilitado: true,
+    reservas_habilitado: false, reserva_token: null,
   }
 
   // estado real del proveedor de correo, para avisar en Configuración si el
@@ -304,13 +306,23 @@ export async function action({ request }: Route.ActionArgs) {
     await ensureConfig()
     const diasRaw = fd.get('agenda_dias_laborables') as string
     const dias = diasRaw ? diasRaw.split(',').map(Number).filter(n => !isNaN(n)) : [1, 2, 3, 4, 5]
-    const { error } = await supabase.from('config_clinica').update({
+    const reservas = fd.get('reservas_habilitado') === 'true'
+    const updates: Record<string, unknown> = {
       agenda_hora_inicio: fd.get('agenda_hora_inicio') || HORARIO_DEFAULT.inicio,
       agenda_hora_fin: fd.get('agenda_hora_fin') || HORARIO_DEFAULT.fin,
       agenda_duracion_default_min: parseInt(fd.get('agenda_duracion_default_min') as string) || 30,
       agenda_dias_laborables: dias,
       agenda_citas_simultaneas: fd.get('agenda_citas_simultaneas') === 'true',
-    }).eq('clinica_id', clinicaId)
+      reservas_habilitado: reservas,
+    }
+    // al activar reservas por primera vez, asegura que exista el token del enlace
+    if (reservas) {
+      const { data: cfg } = await supabase.from('config_clinica').select('reserva_token').eq('clinica_id', clinicaId).maybeSingle()
+      if (!cfg?.reserva_token) {
+        updates.reserva_token = crypto.randomUUID().replace(/-/g, '')
+      }
+    }
+    const { error } = await supabase.from('config_clinica').update(updates).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
@@ -902,7 +914,34 @@ function TratamientosSection({ tratamientos }: { tratamientos: Tratamiento[] }) 
 const DIAS_LABELS = ['L', 'M', 'X', 'J', 'V', 'S', 'D']
 const DIAS_VALUES = [1, 2, 3, 4, 5, 6, 0]
 
-function AgendaSection({ config }: { config: Config }) {
+// Enlace público de reservas: copiar o compartir por WhatsApp
+function ReservaLink({ token, clinicaNombre }: { token: string; clinicaNombre: string }) {
+  const [copiado, setCopiado] = useState(false)
+  const url = typeof window !== 'undefined' ? `${window.location.origin}/reservar/${token}` : `/reservar/${token}`
+  const mensaje = `¡Hola! Reserva tu cita en ${clinicaNombre} desde este enlace: ${url}`
+  return (
+    <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3 space-y-2">
+      <p className="text-xs font-medium text-gray-700">Enlace de reservas</p>
+      <div className="flex gap-2">
+        <input readOnly value={url} onFocus={e => e.currentTarget.select()}
+          className="flex-1 min-w-0 px-2 py-1.5 text-xs font-mono text-gray-600 bg-white border border-gray-200 rounded-lg" />
+        <button type="button"
+          onClick={() => { navigator.clipboard?.writeText(url); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}
+          className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
+          {copiado ? '✓ Copiado' : 'Copiar'}
+        </button>
+        <button type="button"
+          onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(mensaje)}`, '_blank')}
+          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700">
+          <MessageCircle size={13} /> WhatsApp
+        </button>
+      </div>
+      <p className="text-xs text-gray-500">Compártelo con tus pacientes. Las solicitudes entran a la agenda como pendientes.</p>
+    </div>
+  )
+}
+
+function AgendaSection({ config, clinicaNombre }: { config: Config; clinicaNombre: string }) {
   const f = useFetcher()
   const diasStr = config.agenda_dias_laborables.join(',')
   const [dias, setDias] = useState<number[]>(config.agenda_dias_laborables)
@@ -952,10 +991,13 @@ function AgendaSection({ config }: { config: Config }) {
           </select>
         </div>
 
-        <div className="border-t border-gray-100 pt-1">
+        <div className="border-t border-gray-100 pt-1 divide-y divide-gray-100">
           <Toggle name="agenda_citas_simultaneas" defaultChecked={config.agenda_citas_simultaneas}
             label="Permitir citas simultáneas"
             description="Más de una cita a la misma hora (p. ej. con distintos doctores)" />
+          <Toggle name="reservas_habilitado" defaultChecked={config.reservas_habilitado}
+            label="Aceptar reservas por enlace"
+            description="Comparte un enlace para que los pacientes soliciten cita; entra a la agenda como pendiente" />
         </div>
 
         <div className="flex items-center gap-3 pt-2">
@@ -963,6 +1005,10 @@ function AgendaSection({ config }: { config: Config }) {
           <FeedbackMsg data={f.data} />
         </div>
       </f.Form>
+
+      {config.reservas_habilitado && config.reserva_token && (
+        <ReservaLink token={config.reserva_token} clinicaNombre={clinicaNombre} />
+      )}
     </SectionCard>
   )
 }
@@ -1270,7 +1316,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
           {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} doctores={doctores} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'doctores' && <DoctoresSection doctores={doctores} />}
           {tab === 'tratamientos' && <TratamientosSection tratamientos={tratamientos} />}
-          {tab === 'agenda' && <AgendaSection config={config} />}
+          {tab === 'agenda' && <AgendaSection config={config} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'notificaciones' && <NotificacionesSection config={config} resendEstado={resendEstado} />}
           {tab === 'caja' && <CajaSection config={config} />}
           {tab === 'peligro' && <PeligroSection />}

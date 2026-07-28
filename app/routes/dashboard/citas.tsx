@@ -15,6 +15,7 @@ type Cita = {
   fecha_hora: string
   duracion_min: number
   estado: string
+  origen: string
   notas: string | null
   paciente_id: string | null
   doctor_id: string | null
@@ -41,7 +42,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       (() => {
         const q = supabase
           .from('citas')
-          .select('id,fecha_hora,duracion_min,estado,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
+          .select('id,fecha_hora,duracion_min,estado,origen,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
           .eq('clinica_id', clinicaId)
         return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha_hora', { ascending: true })
       })(),
@@ -1222,7 +1223,12 @@ export default function Citas() {
                         <p className="text-sm font-medium text-gray-900">
                           {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {c.pacientes?.nombre ?? 'Sin paciente'}
+                          {c.origen === 'reserva' && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-medium align-middle">En línea</span>
+                          )}
+                        </p>
                         <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
                       </div>
                     </div>
