@@ -296,12 +296,20 @@ function daysInMonth(year: number, month: number) {
 
 // ─── detail modal ────────────────────────────────────────────────────────────
 
+function fmtCitaIsoWa(iso: string) {
+  return new Date(iso).toLocaleString('es-DO', {
+    weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 function CitaDetalleModal({
   cita,
+  clinicaNombre,
   onClose,
   onEdit,
 }: {
   cita: Cita
+  clinicaNombre: string
   onClose: () => void
   onEdit: () => void
 }) {
@@ -310,6 +318,23 @@ function CitaDetalleModal({
   const navigation = useNavigation()
   const submit = useSubmit()
   useCloseOnSubmit(() => setConfirmDelete(false))
+  const tel = cita.pacientes?.telefono ?? null
+  const saludo = cita.pacientes?.nombre ? `Hola ${cita.pacientes.nombre}` : 'Hola'
+
+  function confirmarWa() {
+    // marca la cita como confirmada y avisa al paciente
+    if (cita.estado !== 'confirmada') {
+      submit({ intent: 'cambiar_estado', id: cita.id, estado: 'confirmada' }, { method: 'post' })
+    }
+    if (tel) {
+      abrirWhatsapp(tel, `${saludo}, le saluda ${clinicaNombre}. Le confirmamos su cita para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¡Le esperamos!`)
+    }
+  }
+
+  function recordatorioWa() {
+    if (!tel) return
+    abrirWhatsapp(tel, `${saludo}, le recordamos su cita en ${clinicaNombre} para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¿Nos confirma su asistencia por este medio? Gracias.`)
+  }
 
   return (
     <>
@@ -389,14 +414,34 @@ function CitaDetalleModal({
           )}
         </div>
 
-        {/* footer: delete */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+        {/* footer: acciones */}
+        <div className="px-6 py-4 border-t border-gray-100 flex flex-wrap items-center gap-2 flex-shrink-0">
+          {tel && (
+            <>
+              {cita.estado !== 'confirmada' && (
+                <button
+                  type="button"
+                  onClick={confirmarWa}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                >
+                  <UserCheck size={13} /> Confirmar y avisar
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={recordatorioWa}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+              >
+                <MessageCircle size={13} /> Recordatorio
+              </button>
+            </>
+          )}
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
           >
-            <Trash2 size={13} /> Eliminar cita
+            <Trash2 size={13} /> Eliminar
           </button>
         </div>
       </div>
@@ -1275,6 +1320,7 @@ export default function Citas() {
       {detalle && (
         <CitaDetalleModal
           cita={detalle}
+          clinicaNombre={clinicaNombre}
           onClose={() => setDetalle(null)}
           onEdit={() => {
             setModal({ open: true, cita: detalle })
