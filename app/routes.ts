@@ -10,6 +10,7 @@ export default [
   route('api/export-todo-csv', 'routes/api.export-todo-csv.ts'),
   route('api/export-aging-externo', 'routes/api.export-aging-externo.ts'),
   route('api/export-consultas', 'routes/api.export-consultas.ts'),
+  route('api/onboarding-visto', 'routes/api.onboarding-visto.ts'),
   route('verificar/:id', 'routes/verificar.$id.tsx'),
   route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
   route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),

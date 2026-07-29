@@ -6,6 +6,7 @@ import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskCo
 import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
 import { NotificationBell, type Reserva } from '~/components/NotificationBell'
+import { BienvenidaModal } from '~/components/BienvenidaModal'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed'
 
@@ -15,11 +16,14 @@ export async function loader({ request }: Route.LoaderArgs) {
   if (!user) return redirect('/login')
   const { data: perfil } = await supabase
     .from('perfiles')
-    .select('rol,clinica_id,clinicas(nombre)')
+    .select('rol,clinica_id,nombre,onboarding_visto_at,clinicas(nombre)')
     .eq('id', user.id)
     .single()
   const clinicaNombre = (perfil?.clinicas as any)?.nombre ?? 'Nin Dental Clinic'
   const rol = (perfil?.rol as string) ?? 'recepcionista'
+  // bienvenida pendiente: solo en el primer inicio de sesión
+  const mostrarBienvenida = !!perfil && !perfil.onboarding_visto_at
+  const nombrePerfil = (perfil?.nombre as string | null) ?? null
 
   // reservas en línea pendientes → alertas de la campana (solo quien gestiona
   // el frente: propietario, admin, recepcionista)
@@ -42,7 +46,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     }))
   }
 
-  return { user, clinicaNombre, rol, reservas }
+  return { user, clinicaNombre, rol, reservas, mostrarBienvenida, nombrePerfil }
 }
 
 const nav: { to: string; label: string; icon: any; end: boolean; seccion: Seccion }[] = [
@@ -149,6 +153,15 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
 
   return (
     <div className="flex h-screen bg-gray-50">
+      {/* bienvenida del primer inicio de sesión */}
+      {loaderData.mostrarBienvenida && (
+        <BienvenidaModal
+          nombre={loaderData.nombrePerfil}
+          rol={loaderData.rol}
+          clinicaNombre={loaderData.clinicaNombre}
+        />
+      )}
+
       {/* Desktop sidebar */}
       <aside className={cn(
         'hidden md:flex flex-shrink-0 bg-white border-r border-gray-200 flex-col relative transition-[width] duration-200',

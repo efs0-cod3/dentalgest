@@ -24,7 +24,7 @@ type ClinicaData = {
 }
 type Doctor = { id: string; nombre: string; especialidad: string | null; color: string }
 type Tratamiento = { id: string; nombre: string; precio: number; duracion_min: number; color: string }
-type Perfil = { id: string; rol: string; email: string | null; doctor_id: string | null }
+type Perfil = { id: string; rol: string; email: string | null; nombre: string | null; doctor_id: string | null }
 type Config = {
   agenda_hora_inicio: string; agenda_hora_fin: string
   agenda_duracion_default_min: number; agenda_dias_laborables: number[]
@@ -55,7 +55,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion').eq('id', clinicaId).single(),
       supabase.from('doctores').select('id,nombre,especialidad,color').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,precio,duracion_min,color').eq('clinica_id', clinicaId).order('nombre'),
-      admin.from('perfiles').select('id,rol,email,doctor_id').eq('clinica_id', clinicaId),
+      admin.from('perfiles').select('id,rol,email,nombre,doctor_id').eq('clinica_id', clinicaId),
       supabase.from('config_clinica').select('*').eq('clinica_id', clinicaId).single(),
     ])
 
@@ -492,10 +492,11 @@ function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perf
           {perfiles.map(p => (
             <div key={p.id} className="flex items-center gap-3 py-2 px-2 hover:bg-gray-50 rounded-lg group">
               <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {(p.email?.[0] ?? '?').toUpperCase()}
+                {((p.nombre ?? p.email)?.[0] ?? '?').toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{p.email ?? '(sin email)'}</p>
+                <p className="text-sm font-medium text-gray-900 truncate">{p.nombre ?? p.email ?? '(sin email)'}</p>
+                {p.nombre && p.email && <p className="text-xs text-gray-400 truncate">{p.email}</p>}
                 <select
                   defaultValue={p.rol}
                   onChange={e => {
