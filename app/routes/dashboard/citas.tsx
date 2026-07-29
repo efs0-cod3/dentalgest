@@ -17,6 +17,7 @@ type Cita = {
   duracion_min: number
   estado: string
   origen: string
+  asistencia_confirmada_at: string | null
   notas: string | null
   paciente_id: string | null
   doctor_id: string | null
@@ -43,7 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       (() => {
         const q = supabase
           .from('citas')
-          .select('id,fecha_hora,duracion_min,estado,origen,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre,telefono),doctores(nombre),tratamientos(nombre)')
+          .select('id,fecha_hora,duracion_min,estado,origen,asistencia_confirmada_at,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre,telefono),doctores(nombre),tratamientos(nombre)')
           .eq('clinica_id', clinicaId)
         return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha_hora', { ascending: true })
       })(),
@@ -78,6 +79,16 @@ export async function action({ request }: Route.ActionArgs) {
     const { error } = await supabase.from('citas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message }
     return { ok: true }
+  }
+
+  // marca/desmarca que el paciente confirmó su asistencia (independiente del
+  // estado de la cita)
+  if (intent === 'confirmar_asistencia') {
+    const { error } = await supabase.from('citas')
+      .update({ asistencia_confirmada_at: fd.get('valor') === 'true' ? new Date().toISOString() : null })
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message } : { ok: true }
   }
 
   if (intent === 'cambiar_estado') {
@@ -336,6 +347,13 @@ function CitaDetalleModal({
     abrirWhatsapp(tel, `${saludo}, le recordamos su cita en ${clinicaNombre} para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¿Nos confirma su asistencia por este medio? Gracias.`)
   }
 
+  function toggleAsistencia() {
+    submit(
+      { intent: 'confirmar_asistencia', id: cita.id, valor: cita.asistencia_confirmada_at ? 'false' : 'true' },
+      { method: 'post' },
+    )
+  }
+
   return (
     <>
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
@@ -345,7 +363,14 @@ function CitaDetalleModal({
         <div className="px-6 py-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-start justify-between">
             <div>
-              <EstadoSelect cita={cita} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <EstadoSelect cita={cita} />
+                {cita.asistencia_confirmada_at && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                    <UserCheck size={11} /> Paciente confirmó
+                  </span>
+                )}
+              </div>
               <h2 className="font-semibold text-gray-900 text-lg mt-2 leading-tight">
                 {cita.pacientes?.nombre ?? 'Sin paciente'}
               </h2>
@@ -436,6 +461,20 @@ function CitaDetalleModal({
               </button>
             </>
           )}
+          {/* confirmación de asistencia del paciente (independiente del estado) */}
+          <button
+            type="button"
+            onClick={toggleAsistencia}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors',
+              cita.asistencia_confirmada_at
+                ? 'text-gray-500 border-gray-200 hover:bg-gray-50'
+                : 'text-green-700 border-green-200 hover:bg-green-50',
+            )}
+          >
+            <UserCheck size={13} />
+            {cita.asistencia_confirmada_at ? 'Quitar confirmación' : 'Paciente confirmó'}
+          </button>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
@@ -1302,6 +1341,9 @@ export default function Citas() {
                           {c.pacientes?.nombre ?? 'Sin paciente'}
                           {c.origen === 'reserva' && (
                             <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-medium align-middle">En línea</span>
+                          )}
+                          {c.asistencia_confirmada_at && (
+                            <UserCheck size={12} className="inline-block ml-1 text-green-600 align-middle" aria-label="Paciente confirmó asistencia" />
                           )}
                         </p>
                         <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
