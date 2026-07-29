@@ -5,21 +5,24 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { filtroPropio } from '~/lib/permisos'
 import { getHorarioAgenda } from '~/lib/agenda.server'
-import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp } from 'lucide-react'
+import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp, MessageCircle } from 'lucide-react'
 import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
+import { abrirWhatsapp } from '~/components/WhatsappEnviar'
 
 type Cita = {
   id: string
   fecha_hora: string
   duracion_min: number
   estado: string
+  origen: string
+  asistencia_confirmada_at: string | null
   notas: string | null
   paciente_id: string | null
   doctor_id: string | null
   tratamiento_id: string | null
-  pacientes: { nombre: string } | null
+  pacientes: { nombre: string; telefono: string | null } | null
   doctores: { nombre: string } | null
   tratamientos: { nombre: string } | null
 }
@@ -41,7 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
       (() => {
         const q = supabase
           .from('citas')
-          .select('id,fecha_hora,duracion_min,estado,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre),doctores(nombre),tratamientos(nombre)')
+          .select('id,fecha_hora,duracion_min,estado,origen,asistencia_confirmada_at,notas,paciente_id,doctor_id,tratamiento_id,pacientes(nombre,telefono),doctores(nombre),tratamientos(nombre)')
           .eq('clinica_id', clinicaId)
         return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha_hora', { ascending: true })
       })(),
@@ -50,12 +53,14 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('tratamientos').select('id,nombre,duracion_min').eq('clinica_id', clinicaId).order('nombre'),
       getHorarioAgenda(supabase, clinicaId),
     ])
+  const { data: clinica } = await supabase.from('clinicas').select('nombre').eq('id', clinicaId).single()
   return {
     citas: (citas ?? []) as unknown as Cita[],
     pacientes: (pacientes ?? []) as Paciente[],
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
     horario,
+    clinicaNombre: clinica?.nombre ?? 'la clínica',
   }
 }
 
@@ -74,6 +79,16 @@ export async function action({ request }: Route.ActionArgs) {
     const { error } = await supabase.from('citas').delete().eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message }
     return { ok: true }
+  }
+
+  // marca/desmarca que el paciente confirmó su asistencia (independiente del
+  // estado de la cita)
+  if (intent === 'confirmar_asistencia') {
+    const { error } = await supabase.from('citas')
+      .update({ asistencia_confirmada_at: fd.get('valor') === 'true' ? new Date().toISOString() : null })
+      .eq('id', fd.get('id') as string)
+      .eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message } : { ok: true }
   }
 
   if (intent === 'cambiar_estado') {
@@ -292,20 +307,65 @@ function daysInMonth(year: number, month: number) {
 
 // ─── detail modal ────────────────────────────────────────────────────────────
 
+function fmtCitaIsoWa(iso: string) {
+  return new Date(iso).toLocaleString('es-DO', {
+    weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit',
+  })
+}
+
 function CitaDetalleModal({
   cita,
+  clinicaNombre,
   onClose,
   onEdit,
 }: {
   cita: Cita
+  clinicaNombre: string
   onClose: () => void
   onEdit: () => void
 }) {
   const isPast = new Date(cita.fecha_hora) < new Date()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [aviso, setAviso] = useState<string | null>(null)
   const navigation = useNavigation()
   const submit = useSubmit()
+  const asistFetcher = useFetcher()
   useCloseOnSubmit(() => setConfirmDelete(false))
+  const tel = cita.pacientes?.telefono ?? null
+  const saludo = cita.pacientes?.nombre ? `Hola ${cita.pacientes.nombre}` : 'Hola'
+
+  // aviso breve tras una acción (se limpia solo)
+  function mostrarAviso(msg: string) {
+    setAviso(msg)
+    window.setTimeout(() => setAviso(null), 2500)
+  }
+
+  function confirmarWa() {
+    // marca la cita como confirmada y avisa al paciente
+    if (cita.estado !== 'confirmada') {
+      submit({ intent: 'cambiar_estado', id: cita.id, estado: 'confirmada' }, { method: 'post' })
+    }
+    if (tel) {
+      abrirWhatsapp(tel, `${saludo}, le saluda ${clinicaNombre}. Le confirmamos su cita para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¡Le esperamos!`)
+      mostrarAviso('Abriendo WhatsApp…')
+    }
+  }
+
+  function recordatorioWa() {
+    if (!tel) return
+    abrirWhatsapp(tel, `${saludo}, le recordamos su cita en ${clinicaNombre} para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¿Nos confirma su asistencia por este medio? Gracias.`)
+    mostrarAviso('Abriendo WhatsApp…')
+  }
+
+  function toggleAsistencia() {
+    const marcar = !cita.asistencia_confirmada_at
+    asistFetcher.submit(
+      { intent: 'confirmar_asistencia', id: cita.id, valor: marcar ? 'true' : 'false' },
+      { method: 'post' },
+    )
+    mostrarAviso(marcar ? '✓ Asistencia confirmada' : 'Confirmación quitada')
+  }
+  const guardandoAsist = asistFetcher.state !== 'idle'
 
   return (
     <>
@@ -316,7 +376,14 @@ function CitaDetalleModal({
         <div className="px-6 py-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex items-start justify-between">
             <div>
-              <EstadoSelect cita={cita} />
+              <div className="flex items-center gap-2 flex-wrap">
+                <EstadoSelect cita={cita} />
+                {cita.asistencia_confirmada_at && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-medium">
+                    <UserCheck size={11} /> Paciente confirmó
+                  </span>
+                )}
+              </div>
               <h2 className="font-semibold text-gray-900 text-lg mt-2 leading-tight">
                 {cita.pacientes?.nombre ?? 'Sin paciente'}
               </h2>
@@ -385,15 +452,57 @@ function CitaDetalleModal({
           )}
         </div>
 
-        {/* footer: delete */}
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+        {/* footer: acciones */}
+        <div className="px-6 py-3 border-t border-gray-100 flex-shrink-0">
+          {aviso && (
+            <p className="mb-2 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-1.5">
+              {aviso}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
+          {tel && (
+            <>
+              {cita.estado !== 'confirmada' && (
+                <button
+                  type="button"
+                  onClick={confirmarWa}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors cursor-pointer"
+                >
+                  <UserCheck size={13} /> Confirmar y avisar
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={recordatorioWa}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors cursor-pointer"
+              >
+                <MessageCircle size={13} /> Recordatorio
+              </button>
+            </>
+          )}
+          {/* confirmación de asistencia del paciente (independiente del estado) */}
+          <button
+            type="button"
+            onClick={toggleAsistencia}
+            disabled={guardandoAsist}
+            className={cn(
+              'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default',
+              cita.asistencia_confirmada_at
+                ? 'text-gray-500 border-gray-200 hover:bg-gray-50'
+                : 'text-green-700 border-green-200 hover:bg-green-50',
+            )}
+          >
+            <UserCheck size={13} />
+            {guardandoAsist ? 'Guardando…' : cita.asistencia_confirmada_at ? 'Quitar confirmación' : 'Paciente confirmó'}
+          </button>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
           >
-            <Trash2 size={13} /> Eliminar cita
+            <Trash2 size={13} /> Eliminar
           </button>
+          </div>
         </div>
       </div>
     </div>
@@ -414,12 +523,18 @@ function CitaDetalleModal({
 
 // ─── edit modal ───────────────────────────────────────────────────────────────
 
+function fmtFechaHoraWa(fecha: string, hora: string) {
+  const d = new Date(`${fecha}T${hora}:00`)
+  return d.toLocaleString('es-DO', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+}
+
 function CitaModal({
   cita,
   pacientes,
   doctores,
   tratamientos,
   horario,
+  clinicaNombre,
   onClose,
 }: {
   cita: Cita | null
@@ -427,6 +542,7 @@ function CitaModal({
   doctores: Doctor[]
   tratamientos: Tratamiento[]
   horario: { inicio: string; fin: string }
+  clinicaNombre: string
   onClose: () => void
 }) {
   const navigation = useNavigation()
@@ -610,7 +726,26 @@ function CitaModal({
             <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{actionData.error}</p>
           )}
 
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex items-center justify-between gap-2 pt-2">
+            {/* avisar/confirmar al paciente por WhatsApp (solo citas existentes
+                con teléfono) — abre el chat con el mensaje listo */}
+            {cita?.pacientes?.telefono ? (
+              <button
+                type="button"
+                onClick={() => {
+                  const f = fechaDate && fechaTime ? fmtFechaHoraWa(fechaDate, fechaTime) : ''
+                  const msg =
+                    `Hola${cita.pacientes?.nombre ? ' ' + cita.pacientes.nombre : ''}, le saluda ${clinicaNombre}. ` +
+                    `Le confirmamos su cita${f ? ` para el ${f}` : ''}. ¡Le esperamos! ` +
+                    `Si necesita reprogramar, escríbanos por aquí.`
+                  abrirWhatsapp(cita.pacientes!.telefono!, msg)
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 text-sm font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+              >
+                <MessageCircle size={14} /> Confirmar por WhatsApp
+              </button>
+            ) : <span />}
+            <div className="flex gap-2">
             <button
               type="button"
               onClick={onClose}
@@ -625,6 +760,7 @@ function CitaModal({
             >
               {isSubmitting ? 'Guardando…' : 'Guardar'}
             </button>
+            </div>
           </div>
         </Form>
       </div>
@@ -974,7 +1110,7 @@ function CalendarView({
 // ─── page ────────────────────────────────────────────────────────────────────
 
 export default function Citas() {
-  const { citas, pacientes, doctores, tratamientos, horario } = useLoaderData<typeof loader>()
+  const { citas, pacientes, doctores, tratamientos, horario, clinicaNombre } = useLoaderData<typeof loader>()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const view = searchParams.get('view') ?? 'tabla'
@@ -1222,7 +1358,15 @@ export default function Citas() {
                         <p className="text-sm font-medium text-gray-900">
                           {new Date(c.fecha_hora).toLocaleTimeString('es-DO', { hour: '2-digit', minute: '2-digit' })}
                         </p>
-                        <p className="text-xs text-gray-500 truncate">{c.pacientes?.nombre ?? 'Sin paciente'}</p>
+                        <p className="text-xs text-gray-500 truncate">
+                          {c.pacientes?.nombre ?? 'Sin paciente'}
+                          {c.origen === 'reserva' && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 text-[10px] font-medium align-middle">En línea</span>
+                          )}
+                          {c.asistencia_confirmada_at && (
+                            <UserCheck size={12} className="inline-block ml-1 text-green-600 align-middle" aria-label="Paciente confirmó asistencia" />
+                          )}
+                        </p>
                         <p className="text-xs text-gray-400 truncate">{c.tratamientos?.nombre ?? 'Sin tratamiento'}</p>
                       </div>
                     </div>
@@ -1239,6 +1383,7 @@ export default function Citas() {
       {detalle && (
         <CitaDetalleModal
           cita={detalle}
+          clinicaNombre={clinicaNombre}
           onClose={() => setDetalle(null)}
           onEdit={() => {
             setModal({ open: true, cita: detalle })
@@ -1255,6 +1400,7 @@ export default function Citas() {
           doctores={doctores}
           tratamientos={tratamientos}
           horario={horario}
+          clinicaNombre={clinicaNombre}
           onClose={() => setModal({ open: false, cita: null })}
         />
       )}
