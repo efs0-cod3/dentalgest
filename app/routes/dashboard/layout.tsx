@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { redirect, Outlet, NavLink, Form } from 'react-router'
+import { redirect, Outlet, NavLink, Form, useRevalidator } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
@@ -65,6 +65,22 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const navVisible = nav.filter(n => puedeVer(loaderData.rol, n.seccion))
   // la campana de reservas solo para quien gestiona el frente
   const verNotif = ['propietario', 'admin', 'recepcionista'].includes(loaderData.rol)
+
+  // auto-refresco de la campana: revalida el loader cada 60s para que las
+  // reservas nuevas aparezcan sin recargar. Solo cuando hay campana y la
+  // pestaña está visible; no interrumpe si ya hay una revalidación en curso.
+  const revalidator = useRevalidator()
+  useEffect(() => {
+    if (!verNotif) return
+    const tick = () => {
+      if (document.visibilityState === 'visible' && revalidator.state === 'idle') {
+        revalidator.revalidate()
+      }
+    }
+    const id = setInterval(tick, 60_000)
+    document.addEventListener('visibilitychange', tick)
+    return () => { clearInterval(id); document.removeEventListener('visibilitychange', tick) }
+  }, [verNotif, revalidator])
 
   // restore preference after mount to avoid a server/client hydration mismatch
   // (localStorage isn't available during SSR)
