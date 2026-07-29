@@ -326,11 +326,19 @@ function CitaDetalleModal({
 }) {
   const isPast = new Date(cita.fecha_hora) < new Date()
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [aviso, setAviso] = useState<string | null>(null)
   const navigation = useNavigation()
   const submit = useSubmit()
+  const asistFetcher = useFetcher()
   useCloseOnSubmit(() => setConfirmDelete(false))
   const tel = cita.pacientes?.telefono ?? null
   const saludo = cita.pacientes?.nombre ? `Hola ${cita.pacientes.nombre}` : 'Hola'
+
+  // aviso breve tras una acción (se limpia solo)
+  function mostrarAviso(msg: string) {
+    setAviso(msg)
+    window.setTimeout(() => setAviso(null), 2500)
+  }
 
   function confirmarWa() {
     // marca la cita como confirmada y avisa al paciente
@@ -339,20 +347,25 @@ function CitaDetalleModal({
     }
     if (tel) {
       abrirWhatsapp(tel, `${saludo}, le saluda ${clinicaNombre}. Le confirmamos su cita para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¡Le esperamos!`)
+      mostrarAviso('Abriendo WhatsApp…')
     }
   }
 
   function recordatorioWa() {
     if (!tel) return
     abrirWhatsapp(tel, `${saludo}, le recordamos su cita en ${clinicaNombre} para el ${fmtCitaIsoWa(cita.fecha_hora)}. ¿Nos confirma su asistencia por este medio? Gracias.`)
+    mostrarAviso('Abriendo WhatsApp…')
   }
 
   function toggleAsistencia() {
-    submit(
-      { intent: 'confirmar_asistencia', id: cita.id, valor: cita.asistencia_confirmada_at ? 'false' : 'true' },
+    const marcar = !cita.asistencia_confirmada_at
+    asistFetcher.submit(
+      { intent: 'confirmar_asistencia', id: cita.id, valor: marcar ? 'true' : 'false' },
       { method: 'post' },
     )
+    mostrarAviso(marcar ? '✓ Asistencia confirmada' : 'Confirmación quitada')
   }
+  const guardandoAsist = asistFetcher.state !== 'idle'
 
   return (
     <>
@@ -440,14 +453,20 @@ function CitaDetalleModal({
         </div>
 
         {/* footer: acciones */}
-        <div className="px-6 py-4 border-t border-gray-100 flex flex-wrap items-center gap-2 flex-shrink-0">
+        <div className="px-6 py-3 border-t border-gray-100 flex-shrink-0">
+          {aviso && (
+            <p className="mb-2 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-1.5">
+              {aviso}
+            </p>
+          )}
+          <div className="flex flex-wrap items-center gap-2">
           {tel && (
             <>
               {cita.estado !== 'confirmada' && (
                 <button
                   type="button"
                   onClick={confirmarWa}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors cursor-pointer"
                 >
                   <UserCheck size={13} /> Confirmar y avisar
                 </button>
@@ -455,7 +474,7 @@ function CitaDetalleModal({
               <button
                 type="button"
                 onClick={recordatorioWa}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-green-700 border border-green-200 bg-green-50 rounded-lg hover:bg-green-100 transition-colors cursor-pointer"
               >
                 <MessageCircle size={13} /> Recordatorio
               </button>
@@ -465,23 +484,25 @@ function CitaDetalleModal({
           <button
             type="button"
             onClick={toggleAsistencia}
+            disabled={guardandoAsist}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors',
+              'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-default',
               cita.asistencia_confirmada_at
                 ? 'text-gray-500 border-gray-200 hover:bg-gray-50'
                 : 'text-green-700 border-green-200 hover:bg-green-50',
             )}
           >
             <UserCheck size={13} />
-            {cita.asistencia_confirmada_at ? 'Quitar confirmación' : 'Paciente confirmó'}
+            {guardandoAsist ? 'Guardando…' : cita.asistencia_confirmada_at ? 'Quitar confirmación' : 'Paciente confirmó'}
           </button>
           <button
             type="button"
             onClick={() => setConfirmDelete(true)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
           >
             <Trash2 size={13} /> Eliminar
           </button>
+          </div>
         </div>
       </div>
     </div>
