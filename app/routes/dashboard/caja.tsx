@@ -1930,6 +1930,16 @@ export default function Caja() {
   const submit = useSubmit();
   useCloseOnSubmit(() => setDeleteTarget(null));
 
+  // el modal de detalle guarda una copia local del movimiento: si se eliminó
+  // hay que cerrarlo, y si cambió refrescarlo para no mostrar datos viejos
+  useEffect(() => {
+    if (!detalle) return;
+    const fresh = pagos.find((p) => p.id === detalle.id);
+    if (!fresh) setDetalle(null);
+    else if (fresh !== detalle) setDetalle(fresh);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pagos]);
+
   const filtered = useMemo(() => {
     if (tipoFilter === "todos") return pagos;
     return pagos.filter((p) => p.tipo === tipoFilter);
