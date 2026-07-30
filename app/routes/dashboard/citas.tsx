@@ -6,7 +6,7 @@ import { requireSeccion } from '~/lib/clinica.server'
 import { filtroPropio } from '~/lib/permisos'
 import { getHorarioAgenda } from '~/lib/agenda.server'
 import { Calendar, List, Plus, X, ChevronLeft, ChevronRight, ChevronDown, Pencil, Trash2, Clock, User, Stethoscope, Syringe, FileText, UserCheck, TrendingUp, MessageCircle } from 'lucide-react'
-import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal } from '~/lib/utils'
+import { cn, drLocalToUTC, utcToDrLocal as toDatetimeLocal, drDateKey, drDateParts } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { abrirWhatsapp } from '~/components/WhatsappEnviar'
@@ -62,6 +62,13 @@ export async function loader({ request }: Route.LoaderArgs) {
     horario,
     clinicaNombre: clinica?.nombre ?? 'la clínica',
   }
+}
+
+// clave 'YYYY-MM-DD' de una fecha del calendario de la interfaz (construida con
+// new Date(año, mes, día)), para comparar contra drDateKey sin arrastrar zonas
+function fechaKeyLocal(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 }
 
 function horaAMinutos(hhmm: string) {
@@ -926,11 +933,15 @@ function WeekView({
   const weekEndExclusive = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7)
 
   const citasByDay = useMemo(() => {
+    // se agrupa por el día del calendario dominicano (drDateKey), no por la
+    // zona del entorno: en el servidor (UTC) las citas de la noche caerían en
+    // el día siguiente
     const map: Record<string, Cita[]> = {}
+    const desde = fechaKeyLocal(weekStart)
+    const hasta = fechaKeyLocal(weekEndExclusive)
     for (const c of citas) {
-      const d = new Date(c.fecha_hora)
-      if (d >= weekStart && d < weekEndExclusive) {
-        const key = d.toDateString()
+      const key = drDateKey(c.fecha_hora)
+      if (key >= desde && key < hasta) {
         if (!map[key]) map[key] = []
         map[key].push(c)
       }
@@ -941,7 +952,6 @@ function WeekView({
   }, [citas, weekStart.getTime()])
 
   const rangeLabel = `${days[0].toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString('es-DO', { day: 'numeric', month: 'short', year: 'numeric' })}`
-  const today = new Date()
 
   return (
     <div>
@@ -960,8 +970,8 @@ function WeekView({
 
       <div className="grid grid-cols-7 divide-x divide-gray-100">
         {days.map((d, i) => {
-          const isToday = d.toDateString() === today.toDateString()
-          const dayCitas = citasByDay[d.toDateString()] ?? []
+          const isToday = fechaKeyLocal(d) === drDateKey()
+          const dayCitas = citasByDay[fechaKeyLocal(d)] ?? []
           return (
             <div key={i} className="min-h-[220px]">
               <div className={cn('text-center py-2 border-b border-gray-100', isToday && 'bg-blue-50')}>
@@ -1024,9 +1034,8 @@ function CalendarView({
   const citasByDay = useMemo(() => {
     const map: Record<number, Cita[]> = {}
     for (const c of citas) {
-      const d = new Date(c.fecha_hora)
-      if (d.getFullYear() === year && d.getMonth() === month) {
-        const day = d.getDate()
+      const { year: y, month: m, day } = drDateParts(c.fecha_hora)
+      if (y === year && m === month) {
         if (!map[day]) map[day] = []
         map[day].push(c)
       }
@@ -1058,11 +1067,11 @@ function CalendarView({
 
       <div className="grid grid-cols-7 divide-x divide-y divide-gray-100">
         {cells.map((day, i) => {
-          const today = new Date()
+          const today = drDateParts()
           const isToday = day !== null &&
-            today.getDate() === day &&
-            today.getMonth() === month &&
-            today.getFullYear() === year
+            today.day === day &&
+            today.month === month &&
+            today.year === year
 
           return (
             <div
@@ -1116,18 +1125,21 @@ export default function Citas() {
   const view = searchParams.get('view') ?? 'tabla'
   const monthParam = searchParams.get('month')
 
-  const today = new Date()
+  // hoy según el calendario dominicano, no según la zona del entorno
+  const hoyDr = drDateParts()
   const [calYear, setCalYear] = useState(() => {
     if (monthParam) return parseInt(monthParam.split('-')[0])
-    return today.getFullYear()
+    return hoyDr.year
   })
   const [calMonth, setCalMonth] = useState(() => {
     if (monthParam) return parseInt(monthParam.split('-')[1]) - 1
-    return today.getMonth()
+    return hoyDr.month
   })
 
-  const [weekStart, setWeekStart] = useState(() =>
-    new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay()))
+  const [weekStart, setWeekStart] = useState(() => {
+    const base = new Date(hoyDr.year, hoyDr.month, hoyDr.day)
+    return new Date(base.getFullYear(), base.getMonth(), base.getDate() - base.getDay())
+  })
 
   const [estadoFilter, setEstadoFilter] = useState('todos')
   const [detalle, setDetalle] = useState<Cita | null>(null)
@@ -1149,11 +1161,15 @@ export default function Citas() {
   }, [citas, estadoFilter])
 
   const statsSemana = useMemo(() => {
-    const inicioSemana = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay())
+    const hoyDr = drDateParts()
+    const base = new Date(hoyDr.year, hoyDr.month, hoyDr.day)
+    const inicioSemana = new Date(base.getFullYear(), base.getMonth(), base.getDate() - base.getDay())
     const finSemana = new Date(inicioSemana.getFullYear(), inicioSemana.getMonth(), inicioSemana.getDate() + 7)
+    const desde = fechaKeyLocal(inicioSemana)
+    const hasta = fechaKeyLocal(finSemana)
     const citasSemana = citas.filter(c => {
-      const d = new Date(c.fecha_hora)
-      return d >= inicioSemana && d < finSemana
+      const key = drDateKey(c.fecha_hora)
+      return key >= desde && key < hasta
     })
     const confirmadas = citasSemana.filter(c => c.estado === 'confirmada').length
     const concluidas = citasSemana.filter(c => c.estado === 'completada' || c.estado === 'cancelada')
@@ -1166,18 +1182,18 @@ export default function Citas() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [citas])
 
-  const citasHoy = useMemo(() =>
-    citas
-      .filter(c => {
-        const d = new Date(c.fecha_hora)
-        return d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate()
-      })
-      .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime()),
+  const citasHoy = useMemo(() => {
+    const hoyKey = drDateKey()
+    return citas
+      .filter(c => drDateKey(c.fecha_hora) === hoyKey)
+      .sort((a, b) => new Date(a.fecha_hora).getTime() - new Date(b.fecha_hora).getTime())
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [citas]
-  )
+  }, [citas])
 
-  const fmtHoy = today.toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' })
+  // fecha de hoy en RD, formateada sin depender de la zona del entorno
+  const fmtHoy = new Date(drDateKey() + 'T12:00:00').toLocaleDateString('es-DO', {
+    weekday: 'long', day: 'numeric', month: 'long',
+  })
 
   function setView(v: string) {
     setSearchParams(prev => { prev.set('view', v); return prev }, { replace: true })
@@ -1206,7 +1222,8 @@ export default function Citas() {
   }
 
   function todayWeek() {
-    const t = new Date()
+    const d = drDateParts()
+    const t = new Date(d.year, d.month, d.day)
     setWeekStart(new Date(t.getFullYear(), t.getMonth(), t.getDate() - t.getDay()))
   }
 

@@ -18,6 +18,24 @@ export function utcToDrLocal(iso: string) {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`
 }
 
+// Día del calendario dominicano ('YYYY-MM-DD') de un instante. Necesario porque
+// `new Date().getDate()` usa la zona del entorno: en el servidor (UTC) a partir
+// de las 8:00 PM de RD ya sería el día siguiente, y la agenda mostraría "hoy"
+// corrido un día.
+export function drDateKey(input: string | Date | number = Date.now()): string {
+  const base = typeof input === 'string' ? new Date(input) : new Date(input)
+  const d = new Date(base.getTime() + DR_OFFSET_MS)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
+}
+
+// Partes del día dominicano, para comparar contra calendarios armados con
+// new Date(year, month, day) sin arrastrar la zona del entorno.
+export function drDateParts(input: string | Date | number = Date.now()) {
+  const [y, m, d] = drDateKey(input).split('-').map(Number)
+  return { year: y, month: m - 1, day: d }
+}
+
 // Monedas soportadas por la app
 export type Moneda = 'DOP' | 'USD'
 export const MONEDAS: Moneda[] = ['DOP', 'USD']
