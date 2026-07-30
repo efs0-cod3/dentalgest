@@ -1107,6 +1107,16 @@ export default function Cotizaciones() {
     cotizacion: null,
   });
 
+  // el modal de detalle guarda una copia local de la cotización: si se eliminó
+  // hay que cerrarlo, y si cambió (congelar, reactivar, editar) refrescarlo para
+  // no mostrar datos viejos
+  useEffect(() => {
+    if (!detalle) return;
+    const fresh = cotizaciones.find((c) => c.id === detalle.id);
+    if (!fresh) setDetalle(null);
+    else if (fresh !== detalle) setDetalle(fresh);
+  }, [cotizaciones]);
+
   const totales = {
     total: cotizaciones.length,
     activas: cotizaciones.filter((c) => computeEstado(c) === "activa").length,

@@ -1131,13 +1131,14 @@ export default function Citas() {
 
   const [estadoFilter, setEstadoFilter] = useState('todos')
   const [detalle, setDetalle] = useState<Cita | null>(null)
-  // el modal de detalle guarda una copia local de la cita; si su estado cambia
-  // desde otro lugar (ej. el EstadoSelect de la tabla) hay que refrescarla o
-  // el modal mostraría el estado viejo al revalidar el loader
+  // el modal de detalle guarda una copia local de la cita: si se eliminó hay
+  // que cerrarlo, y si cambió (estado, confirmación de asistencia, edición)
+  // refrescarlo o mostraría datos viejos al revalidar el loader
   useEffect(() => {
     if (!detalle) return
     const fresh = citas.find(c => c.id === detalle.id)
-    if (fresh && fresh.estado !== detalle.estado) setDetalle(fresh)
+    if (!fresh) setDetalle(null)
+    else if (fresh !== detalle) setDetalle(fresh)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [citas])
   const [modal, setModal] = useState<{ open: boolean; cita: Cita | null }>({ open: false, cita: null })
