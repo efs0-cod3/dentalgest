@@ -7,11 +7,10 @@ import { requireSeccion } from '~/lib/clinica.server'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
-import { abrirWhatsapp, telefonoWa } from '~/components/WhatsappEnviar'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
   DollarSign, AlertTriangle, Plus, Pencil, Trash2, X, Check,
-  Download, LogOut, Mail, MessageCircle,
+  Download, LogOut, MessageCircle,
 } from 'lucide-react'
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -24,7 +23,8 @@ type ClinicaData = {
 }
 type Doctor = { id: string; nombre: string; especialidad: string | null; color: string }
 type Tratamiento = { id: string; nombre: string; precio: number; duracion_min: number; color: string }
-type Perfil = { id: string; rol: string; email: string | null; doctor_id: string | null }
+type Perfil = { id: string; rol: string; email: string | null; nombre: string | null; doctor_id: string | null }
+type Invitacion = { id: string; token: string; rol: string; expira_at: string; created_at: string }
 type Config = {
   agenda_hora_inicio: string; agenda_hora_fin: string
   agenda_duracion_default_min: number; agenda_dias_laborables: number[]
@@ -55,9 +55,18 @@ export async function loader({ request }: Route.LoaderArgs) {
       supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion').eq('id', clinicaId).single(),
       supabase.from('doctores').select('id,nombre,especialidad,color').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,precio,duracion_min,color').eq('clinica_id', clinicaId).order('nombre'),
-      admin.from('perfiles').select('id,rol,email,doctor_id').eq('clinica_id', clinicaId),
+      admin.from('perfiles').select('id,rol,email,nombre,doctor_id').eq('clinica_id', clinicaId),
       supabase.from('config_clinica').select('*').eq('clinica_id', clinicaId).single(),
     ])
+
+  // enlaces de registro aún sin usar y vigentes
+  const { data: invitaciones } = await admin
+    .from('invitaciones')
+    .select('id,token,rol,expira_at,created_at')
+    .eq('clinica_id', clinicaId)
+    .is('usada_at', null)
+    .gt('expira_at', new Date().toISOString())
+    .order('created_at', { ascending: false })
 
   const defaultConfig: Config = {
     agenda_hora_inicio: HORARIO_DEFAULT.inicio, agenda_hora_fin: HORARIO_DEFAULT.fin,
@@ -83,6 +92,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
     perfiles: (perfiles ?? []) as Perfil[],
+    invitaciones: (invitaciones ?? []) as Invitacion[],
     config: (config ? { ...defaultConfig, ...config } : defaultConfig) as Config,
     clinicaId,
     resendEstado,
@@ -169,99 +179,6 @@ export async function action({ request }: Route.ActionArgs) {
     return user
   }
 
-  // Genera el enlace de invitación sin enviar correo, para compartirlo por
-  // WhatsApp u otro medio. Evita depender del proveedor de email y de sus
-  // límites de envío.
-  if (intent === 'invite_link') {
-    try {
-      const gestor = await requireGestorEquipo()
-      if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
-      const admin = createSupabaseAdminClient()
-      const emailInvite = (fd.get('email') as string).trim().toLowerCase()
-      const rol = (fd.get('rol') as string) || 'recepcionista'
-      const redirectTo = `${new URL(request.url).origin}/auth/confirmar`
-
-      // 'invite' falla si la cuenta ya existe; en ese caso se genera un enlace
-      // de recuperación, que sirve igual para que fije su contraseña
-      let link: string | null = null
-      let userId: string | null = null
-      const { data: inviteData, error: inviteErr } = await admin.auth.admin.generateLink({
-        type: 'invite',
-        email: emailInvite,
-        options: { data: { clinica_id: clinicaId }, redirectTo },
-      })
-      if (!inviteErr && inviteData) {
-        link = inviteData.properties?.action_link ?? null
-        userId = inviteData.user?.id ?? null
-      } else {
-        const { data: recoveryData, error: recoveryErr } = await admin.auth.admin.generateLink({
-          type: 'recovery',
-          email: emailInvite,
-          options: { redirectTo },
-        })
-        if (recoveryErr || !recoveryData) {
-          return { ok: false, error: (recoveryErr ?? inviteErr)?.message ?? 'No se pudo generar el enlace', intent }
-        }
-        link = recoveryData.properties?.action_link ?? null
-        userId = recoveryData.user?.id ?? null
-      }
-      if (!link || !userId) return { ok: false, error: 'No se pudo generar el enlace', intent }
-
-      const { error: perfilErr } = await admin.from('perfiles').upsert(
-        { id: userId, clinica_id: clinicaId, rol, email: emailInvite },
-        { onConflict: 'id' }
-      )
-      if (perfilErr) return { ok: false, error: perfilErr.message, intent }
-      return { ok: true, intent, link, email: emailInvite }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : 'Error al generar el enlace', intent }
-    }
-  }
-
-  if (intent === 'invite_user') {
-    try {
-      const gestor = await requireGestorEquipo()
-      if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
-      const admin = createSupabaseAdminClient()
-      const emailInvite = (fd.get('email') as string).trim().toLowerCase()
-      const rol = (fd.get('rol') as string) || 'recepcionista'
-      const redirectTo = `${new URL(request.url).origin}/auth/confirmar`
-
-      let invitedId: string
-      const { data: invited, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(emailInvite, {
-        data: { clinica_id: clinicaId },
-        redirectTo,
-      })
-      if (!inviteErr) {
-        invitedId = invited.user.id
-      } else if (inviteErr.status === 422 || /already.*registered/i.test(inviteErr.message)) {
-        // La cuenta ya existe (p. ej. una invitación anterior que no se completó):
-        // localizarla y reenviar un enlace de recuperación para que fije su contraseña
-        let existingId: string | null = null
-        for (let page = 1; page <= 20 && !existingId; page++) {
-          const { data: pageData, error: listErr } = await admin.auth.admin.listUsers({ page, perPage: 200 })
-          if (listErr) return { ok: false, error: listErr.message, intent }
-          existingId = pageData.users.find(u => u.email?.toLowerCase() === emailInvite)?.id ?? null
-          if (pageData.users.length < 200) break
-        }
-        if (!existingId) return { ok: false, error: 'Este correo ya está registrado pero no se pudo localizar la cuenta', intent }
-        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(emailInvite, { redirectTo })
-        if (resetErr) return { ok: false, error: resetErr.message, intent }
-        invitedId = existingId
-      } else {
-        return { ok: false, error: inviteErr.message, intent }
-      }
-
-      const { error: perfilErr } = await admin.from('perfiles').upsert(
-        { id: invitedId, clinica_id: clinicaId, rol, email: emailInvite },
-        { onConflict: 'id' }
-      )
-      if (perfilErr) return { ok: false, error: perfilErr.message, intent }
-      return { ok: true, intent }
-    } catch (e) {
-      return { ok: false, error: e instanceof Error ? e.message : 'Error al invitar', intent }
-    }
-  }
   if (intent === 'update_rol') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
@@ -271,6 +188,33 @@ export async function action({ request }: Route.ActionArgs) {
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
+  // Enlace de registro de un solo uso, para compartir por WhatsApp sin depender
+  // del envío de correos
+  if (intent === 'crear_invitacion') {
+    const gestor = await requireGestorEquipo()
+    if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const admin = createSupabaseAdminClient()
+    const { data: inv, error } = await admin.from('invitaciones')
+      .insert({
+        clinica_id: clinicaId,
+        rol: (fd.get('rol') as string) || 'recepcionista',
+        creada_por: gestor.id,
+      })
+      .select('token,rol')
+      .single()
+    if (error || !inv) return { ok: false, error: error?.message ?? 'No se pudo crear el enlace', intent }
+    return { ok: true, intent, token: inv.token as string, rol: inv.rol as string }
+  }
+
+  if (intent === 'revocar_invitacion') {
+    const gestor = await requireGestorEquipo()
+    if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const admin = createSupabaseAdminClient()
+    const { error } = await admin.from('invitaciones').delete()
+      .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId).is('usada_at', null)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+  }
+
   if (intent === 'update_doctor_vinculado') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
@@ -475,13 +419,13 @@ function ClinicaSection({ clinica }: { clinica: ClinicaData | null }) {
 
 const ROLES = ['propietario', 'admin', 'recepcionista', 'doctor', 'laboratorio'] as const
 
-function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perfil[]; doctores: Doctor[]; clinicaNombre: string }) {
+function UsuariosSection({ perfiles, doctores, invitaciones, clinicaNombre }: { perfiles: Perfil[]; doctores: Doctor[]; invitaciones: Invitacion[]; clinicaNombre: string }) {
   const f = useFetcher()
   const [inviting, setInviting] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Perfil | null>(null)
 
   useEffect(() => {
-    if (f.data?.ok && f.data.intent === 'invite_user') setInviting(false)
+    if (f.data?.ok && f.data.intent === 'crear_invitacion') setInviting(false)
     if (f.state === 'idle') setDeleteTarget(null)
   }, [f.data, f.state])
 
@@ -492,10 +436,11 @@ function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perf
           {perfiles.map(p => (
             <div key={p.id} className="flex items-center gap-3 py-2 px-2 hover:bg-gray-50 rounded-lg group">
               <div className="w-8 h-8 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0">
-                {(p.email?.[0] ?? '?').toUpperCase()}
+                {((p.nombre ?? p.email)?.[0] ?? '?').toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-900 truncate">{p.email ?? '(sin email)'}</p>
+                <p className="text-sm font-medium text-gray-900 truncate">{p.nombre ?? p.email ?? '(sin email)'}</p>
+                {p.nombre && p.email && <p className="text-xs text-gray-400 truncate">{p.email}</p>}
                 <select
                   defaultValue={p.rol}
                   onChange={e => {
@@ -568,51 +513,54 @@ function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perf
         <div className="mt-4 pt-4 border-t border-gray-100">
           {inviting ? (
             <f.Form method="post" className="space-y-2">
-              {/* el intent lo fija el botón pulsado: enviar correo o generar enlace */}
-              <div className="flex flex-wrap gap-2">
-                <input name="email" type="email" required autoFocus placeholder="email@ejemplo.com"
-                  className="flex-1 min-w-48 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Nuevo enlace de registro</p>
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-sm text-gray-600">Rol:</span>
                 <select name="rol" defaultValue="recepcionista"
                   className="px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                   {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                 </select>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="submit" name="intent" value="invite_link" disabled={f.state !== 'idle'}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50">
-                  <MessageCircle size={13} /> Generar enlace
-                </button>
-                <button type="submit" name="intent" value="invite_user" disabled={f.state !== 'idle'}
-                  className="flex items-center gap-1.5 px-4 py-2 bg-white text-gray-700 border border-gray-200 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
-                  <Mail size={13} /> Enviar por correo
+                <button type="submit" name="intent" value="crear_invitacion" disabled={f.state !== 'idle'}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50 cursor-pointer">
+                  <MessageCircle size={13} /> {f.state !== 'idle' ? 'Creando…' : 'Crear enlace'}
                 </button>
                 <button type="button" onClick={() => setInviting(false)}
-                  className="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200">
+                  className="px-3 py-2 bg-gray-100 text-gray-600 text-sm rounded-lg hover:bg-gray-200 cursor-pointer">
                   Cancelar
                 </button>
               </div>
               <p className="text-xs text-gray-400">
-                «Generar enlace» no envía correo: crea el acceso y te da el enlace para compartirlo por WhatsApp.
+                Genera un enlace de un solo uso para compartir por WhatsApp. La persona crea su cuenta con el rol
+                indicado; no se envía ningún correo.
               </p>
             </f.Form>
           ) : (
             <button onClick={() => setInviting(true)}
-              className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700">
-              <Plus size={14} /> Invitar usuario
+              className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+              <Plus size={14} /> Crear enlace de registro
             </button>
           )}
 
-          {/* enlace generado: copiar o abrir WhatsApp con el mensaje listo */}
-          {f.data?.ok && f.data.intent === 'invite_link' && f.data.link && (
-            <InviteLinkResult link={f.data.link} email={f.data.email as string} clinicaNombre={clinicaNombre} />
+          {/* enlaces pendientes: copiar, compartir por WhatsApp o revocar */}
+          {invitaciones.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                Enlaces pendientes ({invitaciones.length})
+              </p>
+              {invitaciones.map(inv => (
+                <InvitacionRow key={inv.id} inv={inv} clinicaNombre={clinicaNombre}
+                  onRevocar={() => {
+                    const fd = new FormData()
+                    fd.append('intent', 'revocar_invitacion')
+                    fd.append('id', inv.id)
+                    f.submit(fd, { method: 'post' })
+                  }} />
+              ))}
+            </div>
           )}
 
-          {f.data && (
-            f.data.ok && f.data.intent === 'invite_user'
-              ? <p className="mt-2 text-xs text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">✓ Invitación enviada</p>
-              : !f.data.ok
-                ? <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{f.data.error}</p>
-                : null
+          {f.data && !f.data.ok && (
+            <p className="mt-2 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">{f.data.error}</p>
           )}
         </div>
       </SectionCard>
@@ -620,50 +568,40 @@ function UsuariosSection({ perfiles, doctores, clinicaNombre }: { perfiles: Perf
   )
 }
 
-// Enlace de invitación recién generado: copiar o enviar por WhatsApp
-function InviteLinkResult({ link, email, clinicaNombre }: {
-  link: string; email: string; clinicaNombre: string
+// Fila de un enlace de registro pendiente: copiar, WhatsApp o revocar
+function InvitacionRow({ inv, clinicaNombre, onRevocar }: {
+  inv: Invitacion; clinicaNombre: string; onRevocar: () => void
 }) {
   const [copiado, setCopiado] = useState(false)
-  const [telefono, setTelefono] = useState('')
-
+  const url = typeof window !== 'undefined' ? `${window.location.origin}/unirse/${inv.token}` : `/unirse/${inv.token}`
   const mensaje =
-    `Hola, le saluda ${clinicaNombre}. Le damos acceso al sistema de la clínica. ` +
-    `Entre con este enlace para crear su contraseña (es personal, no lo comparta): ${link}`
+    `¡Hola! Te damos acceso al sistema de ${clinicaNombre}. ` +
+    `Crea tu cuenta con este enlace (es personal y de un solo uso): ${url}`
+  const vence = new Date(inv.expira_at).toLocaleDateString('es-DO', { day: 'numeric', month: 'short' })
 
   return (
-    <div className="mt-3 rounded-xl border border-green-100 bg-green-50 p-3 space-y-3">
-      <div>
-        <p className="text-xs font-medium text-gray-700">
-          ✓ Acceso creado para <strong>{email}</strong>
-        </p>
-        <p className="text-xs text-gray-500 mt-0.5">
-          Comparte este enlace para que cree su contraseña. Es de un solo uso y caduca.
-        </p>
-      </div>
-
-      <div className="flex gap-2">
-        <input readOnly value={link} onFocus={e => e.currentTarget.select()}
-          className="flex-1 min-w-0 px-2 py-1.5 text-xs font-mono text-gray-600 bg-white border border-gray-200 rounded-lg" />
-        <button type="button"
-          onClick={() => {
-            navigator.clipboard?.writeText(link)
-            setCopiado(true)
-            setTimeout(() => setCopiado(false), 2000)
-          }}
-          className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50">
-          {copiado ? '✓ Copiado' : 'Copiar'}
+    <div className="rounded-xl border border-green-100 bg-green-50 p-3 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="px-2 py-0.5 rounded-full bg-white text-gray-700 text-xs font-semibold capitalize border border-gray-200">
+          {inv.rol}
+        </span>
+        <span className="text-xs text-gray-500">Vence el {vence}</span>
+        <button type="button" onClick={onRevocar}
+          className="ml-auto text-xs text-gray-400 hover:text-red-600 cursor-pointer">
+          Revocar
         </button>
       </div>
-
       <div className="flex gap-2">
-        <input type="tel" value={telefono} onChange={e => setTelefono(e.target.value)}
-          placeholder="Teléfono (809 555 1234)"
-          className="flex-1 min-w-0 px-3 py-2 text-sm text-gray-900 bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500" />
+        <input readOnly value={url} onFocus={e => e.currentTarget.select()}
+          className="flex-1 min-w-0 px-2 py-1.5 text-xs font-mono text-gray-600 bg-white border border-gray-200 rounded-lg" />
         <button type="button"
-          onClick={() => abrirWhatsapp(telefono, mensaje)}
-          disabled={telefonoWa(telefono).length < 10}
-          className="flex-shrink-0 flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-50">
+          onClick={() => { navigator.clipboard?.writeText(url); setCopiado(true); setTimeout(() => setCopiado(false), 2000) }}
+          className="flex-shrink-0 px-3 py-1.5 text-xs font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer">
+          {copiado ? '✓ Copiado' : 'Copiar'}
+        </button>
+        <button type="button"
+          onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(mensaje)}`, '_blank')}
+          className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 cursor-pointer">
           <MessageCircle size={13} /> WhatsApp
         </button>
       </div>
@@ -1262,7 +1200,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Configuracion({ loaderData }: Route.ComponentProps) {
-  const { clinica, doctores, tratamientos, perfiles, config, resendEstado } = loaderData
+  const { clinica, doctores, tratamientos, perfiles, invitaciones, config, resendEstado } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
   const tab = (searchParams.get('tab') ?? 'clinica') as TabId
 
@@ -1313,7 +1251,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
       <div className="flex-1 overflow-auto p-4 md:p-6">
         <div className="max-w-2xl space-y-4">
           {tab === 'clinica' && <ClinicaSection clinica={clinica} />}
-          {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} doctores={doctores} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
+          {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} doctores={doctores} invitaciones={invitaciones} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'doctores' && <DoctoresSection doctores={doctores} />}
           {tab === 'tratamientos' && <TratamientosSection tratamientos={tratamientos} />}
           {tab === 'agenda' && <AgendaSection config={config} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}

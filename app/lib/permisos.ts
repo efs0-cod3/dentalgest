@@ -34,6 +34,33 @@ export function esRol(valor: string | null | undefined): valor is Rol {
   return !!valor && (ROLES as readonly string[]).includes(valor)
 }
 
+// secciones que el rol puede abrir, en orden — usado por la bienvenida
+export function seccionesDe(rol: string | null | undefined): Seccion[] {
+  return esRol(rol) ? ACCESO[rol] : []
+}
+
+// cómo se le explica cada sección a alguien que entra por primera vez
+export const SECCION_INFO: Record<Seccion, { label: string; desc: string }> = {
+  inicio: { label: 'Inicio', desc: 'Resumen del día: citas, ingresos y próximas citas.' },
+  citas: { label: 'Citas', desc: 'La agenda: crear, confirmar y dar seguimiento a las citas.' },
+  consultas: { label: 'Histórico de consultas', desc: 'Registro clínico de lo realizado en cada consulta.' },
+  pacientes: { label: 'Pacientes', desc: 'Fichas con datos, expediente, documentos y odontograma.' },
+  caja: { label: 'Caja', desc: 'Cobros y gastos, cuentas por cobrar y recibos.' },
+  cotizaciones: { label: 'Cotizaciones', desc: 'Presupuestos para el paciente, imprimibles y con vigencia.' },
+  laboratorio: { label: 'Laboratorio', desc: 'Órdenes enviadas al laboratorio y su estado de entrega.' },
+  'trabajos-externos': { label: 'Trabajos externos', desc: 'Trabajos recibidos de otras clínicas o doctores.' },
+  configuracion: { label: 'Configuración', desc: 'Datos de la clínica, equipo, doctores, tratamientos y agenda.' },
+}
+
+// nota extra según el rol, para dejar claro el alcance de su acceso
+export const ROL_NOTA: Record<Rol, string> = {
+  propietario: 'Tienes acceso completo, incluida la configuración de la clínica.',
+  admin: 'Tienes acceso completo, incluida la configuración de la clínica.',
+  recepcionista: 'Tienes acceso a toda la operación diaria. La configuración de la clínica queda reservada a propietario y admin.',
+  doctor: 'Verás únicamente tus citas, tus pacientes y tus órdenes de laboratorio.',
+  laboratorio: 'Verás las órdenes de laboratorio y los trabajos externos, sin los importes.',
+}
+
 export function puedeVer(rol: string | null | undefined, seccion: Seccion): boolean {
   if (!esRol(rol)) return false
   return ACCESO[rol].includes(seccion)
