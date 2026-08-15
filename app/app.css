@@ -1,15 +1,133 @@
 @import "tailwindcss";
 
+/* ─── Tema claro / oscuro ───────────────────────────────────────────────────
+   La app usa utilidades de color de Tailwind escritas directamente en los
+   componentes (bg-white, text-gray-900, …). Para no reescribir ~2.000 clases,
+   el tema se resuelve aquí: en modo oscuro se redefinen los tokens de color
+   de Tailwind, así cada utilidad existente cambia sola.
+
+   Los nombres pasan a ser "ranuras" del tema, no colores literales:
+   en oscuro `bg-white` pinta el panel oscuro y `text-gray-900` pinta claro.
+
+   Un tono puede significar cosas opuestas según se use de texto o de fondo
+   (bg-blue-600 es un botón; text-blue-600 es una etiqueta). Por eso el token
+   se ajusta para TEXTO —el uso más frecuente— y los fondos se corrigen abajo,
+   en el bloque de anulaciones.
+─────────────────────────────────────────────────────────────────────────── */
+
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif,
     "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 }
 
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* superficies: white = panel, gray-50/100/200 = niveles por encima */
+  --color-white: #1a1f1e;
+  --color-gray-50: #222827;
+  --color-gray-100: #272e2d;
+  --color-gray-200: #333b39;
+  --color-gray-300: #414a48;
+  /* texto: de más tenue a más fuerte */
+  --color-gray-400: #8b9a96;
+  --color-gray-500: #9caaa6;
+  --color-gray-600: #b4c0bc;
+  --color-gray-700: #c9d3d0;
+  --color-gray-800: #dde5e2;
+  --color-gray-900: #eef4f2;
+  --color-slate-50: #222827;
+  --color-slate-100: #272e2d;
+
+  /* azul */
+  --color-blue-50: #16283d;
+  --color-blue-100: #1d3a58;
+  --color-blue-200: #26496e;
+  --color-blue-300: #5b9ce8;
+  --color-blue-400: #79b0f0;
+  --color-blue-500: #4f9bec;
+  --color-blue-600: #7ab3f0;
+  --color-blue-700: #9cc8f5;
+  --color-blue-800: #b9d8f8;
+
+  /* verde */
+  --color-green-50: #123020;
+  --color-green-100: #17402a;
+  --color-green-200: #1e5136;
+  --color-green-500: #4ecf98;
+  --color-green-600: #5fd6a3;
+  --color-green-700: #77e0b3;
+
+  /* rojo */
+  --color-red-50: #33191b;
+  --color-red-100: #422022;
+  --color-red-200: #52282a;
+  --color-red-500: #f08a8a;
+  --color-red-600: #f19696;
+  --color-red-700: #f6adad;
+
+  /* ámbar / amarillo */
+  --color-amber-50: #2e2410;
+  --color-amber-100: #3d3016;
+  --color-amber-600: #e5b970;
+  --color-amber-700: #eec684;
+  --color-yellow-100: #3d3016;
+  --color-yellow-700: #eec684;
+
+  /* morado */
+  --color-purple-100: #2b2340;
+  --color-purple-600: #bda9f7;
+  --color-purple-700: #c8b7f9;
+
+  /* naranja */
+  --color-orange-50: #33230f;
+  --color-orange-100: #432f1a;
+  --color-orange-500: #f7a35c;
+  --color-orange-600: #f8ad6c;
+  --color-orange-700: #fabb85;
+}
+
+/* ─── Anulaciones de fondo en modo oscuro ───────────────────────────────────
+   Los tonos de arriba están calibrados para texto. Donde el mismo tono se usa
+   como fondo (botones y sus estados hover) hace falta un color sólido con
+   texto blanco encima. El hover queda más claro que el reposo, que es lo
+   natural sobre fondo oscuro.
+─────────────────────────────────────────────────────────────────────────── */
+
+:root[data-theme="dark"] {
+  /* el blanco de los textos sobre botones de color debe seguir siendo blanco */
+  .text-white { color: #ffffff; }
+
+  .bg-blue-600 { background-color: #2f7fd6; }
+  .hover\:bg-blue-700:hover { background-color: #4791e0; }
+  .bg-blue-700 { background-color: #2b73c2; }
+
+  .bg-green-600 { background-color: #2f9e6b; }
+  .hover\:bg-green-700:hover { background-color: #38b77c; }
+  .bg-green-700 { background-color: #2a8c5f; }
+
+  .bg-red-600 { background-color: #cf4747; }
+  .hover\:bg-red-700:hover { background-color: #de5a5a; }
+
+  .bg-orange-600 { background-color: #cf7d34; }
+
+  /* botones oscuros (p. ej. «Imprimir»): en tema oscuro se aclaran para que
+     no se fundan con el panel */
+  .bg-gray-900 { background-color: #2f3735; }
+  .hover\:bg-gray-800:hover { background-color: #3a4341; }
+}
+
+/* placeholders y controles nativos legibles en oscuro */
+:root[data-theme="dark"] ::placeholder {
+  color: #7d8b87;
+  opacity: 1;
+}
+
 html,
 body {
-  @apply bg-white dark:bg-gray-950;
-
-  @media (prefers-color-scheme: dark) {
-    color-scheme: dark;
-  }
+  background-color: var(--color-white);
 }

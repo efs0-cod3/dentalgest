@@ -9,6 +9,14 @@ import {
 import type { Route } from './+types/root'
 import './app.css'
 
+// Aplica el tema guardado antes del primer pintado, para que no se vea el
+// destello claro al cargar. 'sistema' sigue la preferencia del dispositivo.
+const TEMA_INIT = `(function(){try{
+var t=localStorage.getItem('tema')||'sistema';
+var oscuro=t==='oscuro'||(t==='sistema'&&window.matchMedia('(prefers-color-scheme: dark)').matches);
+document.documentElement.setAttribute('data-theme',oscuro?'dark':'light');
+}catch(e){}})()`
+
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="es">
@@ -17,6 +25,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <Meta />
         <Links />
+        <script dangerouslySetInnerHTML={{ __html: TEMA_INIT }} />
       </head>
       <body>
         {children}

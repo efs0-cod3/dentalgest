@@ -7,6 +7,7 @@ import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
 import { NotificationBell, type Reserva } from '~/components/NotificationBell'
 import { BienvenidaModal } from '~/components/BienvenidaModal'
+import { TemaSelector } from '~/components/TemaSelector'
 
 const SIDEBAR_COLLAPSED_KEY = 'sidebarCollapsed'
 
@@ -131,6 +132,9 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         ))}
       </nav>
       <div className="px-3 py-4 border-t border-gray-100">
+        <div className="mb-3">
+          <TemaSelector compacto={collapsedNav} />
+        </div>
         {!collapsedNav && (
           <p className="text-xs text-gray-500 px-3 mb-2 truncate">{loaderData.user.email}</p>
         )}
