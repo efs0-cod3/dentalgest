@@ -18,7 +18,7 @@ function aplicar(tema: Tema) {
   document.documentElement.setAttribute('data-theme', oscuro ? 'dark' : 'light')
 }
 
-export function TemaSelector({ compacto = false }: { compacto?: boolean }) {
+export function TemaSelector() {
   // se arranca en 'sistema' y se corrige tras montar: durante el render del
   // servidor no hay localStorage y un valor distinto rompería la hidratación
   const [tema, setTema] = useState<Tema>('sistema')
@@ -43,40 +43,23 @@ export function TemaSelector({ compacto = false }: { compacto?: boolean }) {
     aplicar(valor)
   }
 
-  if (compacto) {
-    // en el menú colapsado: un solo botón que alterna claro/oscuro
-    const siguiente: Tema = tema === 'oscuro' ? 'claro' : 'oscuro'
-    const Icon = tema === 'oscuro' ? Sun : Moon
-    return (
-      <button
-        type="button"
-        onClick={() => elegir(siguiente)}
-        title={tema === 'oscuro' ? 'Tema claro' : 'Tema oscuro'}
-        className="flex items-center justify-center w-full px-0 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors cursor-pointer"
-      >
-        <Icon size={16} />
-      </button>
-    )
-  }
-
   return (
-    <div className="flex gap-1 bg-gray-100 rounded-lg p-1" role="group" aria-label="Tema">
+    <div className="flex gap-1 bg-gray-100 rounded-lg p-1 max-w-sm" role="group" aria-label="Tema">
       {OPCIONES.map(({ valor, label, Icon }) => (
         <button
           key={valor}
           type="button"
           onClick={() => elegir(valor)}
           aria-pressed={tema === valor}
-          title={label}
           className={cn(
-            'flex-1 flex items-center justify-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer',
+            'flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer',
             tema === valor
               ? 'bg-white text-gray-900 shadow-sm'
               : 'text-gray-500 hover:text-gray-700',
           )}
         >
-          <Icon size={13} />
-          <span className="hidden lg:inline">{label}</span>
+          <Icon size={14} />
+          {label}
         </button>
       ))}
     </div>
