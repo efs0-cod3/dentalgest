@@ -14,6 +14,7 @@ import {
 import { cn } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { WhatsappEnviar } from '~/components/WhatsappEnviar'
+import { MARCA_LAB } from '~/lib/marca'
 import { buildTrabajoHtml, buildFacturaExternaHtml } from '~/lib/trabajoExterno'
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -84,7 +85,7 @@ function photoStoragePath(url: string) {
 // ─── meta ─────────────────────────────────────────────────────────────────────
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: 'Trabajos externos — Nin Dental Clinic' }]
+  return [{ title: `Trabajos externos — ${MARCA_LAB}` }]
 }
 
 // ─── loader ───────────────────────────────────────────────────────────────────
@@ -114,7 +115,8 @@ export async function loader({ request }: Route.LoaderArgs) {
     return { ...rest, monto_pagado, saldo, porcentaje }
   })
   return {
-    clinicaNombre: perfilClinica?.nombre ?? 'Nin Dental Clinic',
+    // frente a clientes externos el negocio se presenta como laboratorio
+    clinicaNombre: MARCA_LAB,
     clinicaRnc: (perfilClinica?.rnc as string | null) ?? null,
     clientes: (clientes ?? []) as ClienteExterno[],
     trabajos: ((trabajos ?? []) as unknown as TrabajoExterno[]).map(t =>

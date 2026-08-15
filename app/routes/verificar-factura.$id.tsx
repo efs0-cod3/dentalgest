@@ -1,5 +1,6 @@
 import type { Route } from "./+types/verificar-factura.$id";
 import { createSupabaseAdminClient } from "~/lib/supabase.admin.server";
+import { MARCA_LAB, MARCA_LAB_CORTA } from "~/lib/marca";
 import { CheckCircle, XCircle, ShieldCheck } from "lucide-react";
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -16,9 +17,9 @@ type FacturaPublica = {
 // ─── meta ─────────────────────────────────────────────────────────────────────
 
 export function meta({ data }: Route.MetaArgs) {
-  if (!data?.factura) return [{ title: "Factura no encontrada — Nin Dental Clinic" }];
+  if (!data?.factura) return [{ title: `Factura no encontrada — ${MARCA_LAB}` }];
   const folio = (data.factura as FacturaPublica).id.slice(-8).toUpperCase();
-  return [{ title: `Factura #${folio} — Nin Dental Clinic` }];
+  return [{ title: `Factura #${folio} — ${MARCA_LAB}` }];
 }
 
 // ─── loader ───────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ export default function VerificarFactura({ loaderData }: Route.ComponentProps) {
               Si crees que es un error, contacta directamente a la clínica.
             </p>
             <p className="mt-4 text-xs text-gray-400 font-semibold tracking-widest uppercase">
-              Nin Dental Clinic
+              {MARCA_LAB}
             </p>
           </div>
         </div>
@@ -85,10 +86,10 @@ export default function VerificarFactura({ loaderData }: Route.ComponentProps) {
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl overflow-hidden">
         <div className="bg-gradient-to-br from-blue-800 to-blue-500 px-6 py-7 text-center">
-          <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3 text-2xl">
-            🦷
+          <div className="w-12 h-12 bg-white/15 rounded-2xl flex items-center justify-center mx-auto mb-3">
+            <span className="text-white font-bold tracking-wider text-sm">{MARCA_LAB_CORTA}</span>
           </div>
-          <p className="text-white font-bold text-lg">Nin Dental Clinic</p>
+          <p className="text-white font-bold text-lg">{MARCA_LAB}</p>
           <p className="text-blue-200 text-xs mt-0.5">Verificación de factura — trabajos externos</p>
         </div>
 
@@ -124,7 +125,7 @@ export default function VerificarFactura({ loaderData }: Route.ComponentProps) {
 
         <div className="px-6 py-4 bg-slate-50 border-t border-gray-100 text-center">
           <p className="text-[10px] text-gray-400 leading-relaxed">
-            Este documento es una factura emitida por Nin Dental Clinic por trabajos de laboratorio externos.
+            Este documento es una factura emitida por {MARCA_LAB} por trabajos de laboratorio externos.
             <br />Folio: <span className="font-mono font-semibold">{factura.id}</span>
           </p>
         </div>

@@ -7,15 +7,16 @@ import { requireSeccion } from '~/lib/clinica.server'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
+import { TemaSelector } from '~/components/TemaSelector'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
   DollarSign, AlertTriangle, Plus, Pencil, Trash2, X, Check,
-  Download, LogOut, MessageCircle,
+  Download, LogOut, MessageCircle, Palette,
 } from 'lucide-react'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
-type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'peligro'
+type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'apariencia' | 'peligro'
 
 type ClinicaData = {
   id: string; nombre: string; rnc: string | null
@@ -1186,6 +1187,20 @@ function PeligroSection() {
 
 // ─── tabs ─────────────────────────────────────────────────────────────────────
 
+// ─── section: Apariencia ──────────────────────────────────────────────────────
+
+function AparienciaSection() {
+  return (
+    <SectionCard title="Tema" description="Cómo se ve la aplicación en este dispositivo">
+      <TemaSelector />
+      <p className="text-xs text-gray-400 mt-3">
+        La preferencia se guarda en este navegador, así que cada persona del equipo elige la suya.
+        Con «Sistema» se sigue la configuración del dispositivo.
+      </p>
+    </SectionCard>
+  )
+}
+
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'clinica', label: 'Clínica', icon: Building2 },
   { id: 'usuarios', label: 'Usuarios', icon: Users },
@@ -1194,6 +1209,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'agenda', label: 'Agenda', icon: Calendar },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'caja', label: 'Caja', icon: DollarSign },
+  { id: 'apariencia', label: 'Apariencia', icon: Palette },
   { id: 'peligro', label: 'Zona de peligro', icon: AlertTriangle },
 ]
 
@@ -1257,6 +1273,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
           {tab === 'agenda' && <AgendaSection config={config} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'notificaciones' && <NotificacionesSection config={config} resendEstado={resendEstado} />}
           {tab === 'caja' && <CajaSection config={config} />}
+          {tab === 'apariencia' && <AparienciaSection />}
           {tab === 'peligro' && <PeligroSection />}
         </div>
       </div>
