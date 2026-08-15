@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { cn, fmtMoney } from "~/lib/utils";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
+import { MARCA_LAB } from "~/lib/marca";
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ function buildOrdenHtml(orden: OrdenLaboratorio): string {
 
   return `<!DOCTYPE html><html lang="es"><head>
 <meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Orden de Laboratorio #${folio} — Nin Dental Clinic</title>
+<title>Orden de Laboratorio #${folio} — ${MARCA_LAB}</title>
 <script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
@@ -97,7 +98,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;ba
   <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:22px 28px;display:flex;justify-content:space-between;align-items:flex-start;">
     <div>
       <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;text-transform:uppercase;letter-spacing:.1em;">Orden de Laboratorio</p>
-      <p style="color:white;font-size:18px;font-weight:800;margin:0 0 2px;">Nin Dental Clinic</p>
+      <p style="color:white;font-size:18px;font-weight:800;margin:0 0 2px;">${MARCA_LAB}</p>
       <p style="color:rgba(255,255,255,.8);font-size:12px;margin:0;font-family:monospace;">Folio #${folio}</p>
     </div>
     <div style="text-align:right;">
@@ -146,7 +147,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;ba
 // ─── meta ─────────────────────────────────────────────────────────────────────
 
 export function meta(): Route.MetaDescriptors {
-  return [{ title: "Laboratorio — Nin Dental Clinic" }];
+  return [{ title: `Laboratorio — ${MARCA_LAB}` }];
 }
 
 // ─── loader ───────────────────────────────────────────────────────────────────
