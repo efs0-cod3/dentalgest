@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { redirect, Outlet, NavLink, Form, useRevalidator } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Palette, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
 import { NotificationBell, type Reserva } from '~/components/NotificationBell'
@@ -59,6 +59,8 @@ const nav: { to: string; label: string; icon: any; end: boolean; seccion: Seccio
   { to: '/dashboard/laboratorio', label: 'Laboratorio', icon: FlaskConical, end: false, seccion: 'laboratorio' },
   { to: '/dashboard/trabajos-externos', label: 'Trabajos externos', icon: Building2, end: false, seccion: 'trabajos-externos' },
   { to: '/dashboard/configuracion', label: 'Configuración', icon: Settings, end: false, seccion: 'configuracion' },
+  // para quien no gestiona la clínica, la misma ruta muestra solo el tema
+  { to: '/dashboard/configuracion?tab=apariencia', label: 'Apariencia', icon: Palette, end: false, seccion: 'apariencia' },
 ]
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
@@ -66,7 +68,10 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
   const [collapsed, setCollapsed] = useState(false)
   // el menú solo muestra lo que el rol puede abrir (el bloqueo real está en
   // el loader de cada ruta)
-  const navVisible = nav.filter(n => puedeVer(loaderData.rol, n.seccion))
+  const navVisible = nav
+    .filter(n => puedeVer(loaderData.rol, n.seccion))
+    // quien entra a Configuración ya tiene ahí la pestaña de Apariencia
+    .filter(n => !(n.seccion === 'apariencia' && puedeVer(loaderData.rol, 'configuracion')))
   // la campana de reservas solo para quien gestiona el frente
   const verNotif = ['propietario', 'admin', 'recepcionista'].includes(loaderData.rol)
 
