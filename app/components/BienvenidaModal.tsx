@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useRevalidator } from 'react-router'
 import {
   LayoutDashboard, Calendar, Stethoscope, Users, DollarSign, FileText,
-  FlaskConical, Building2, Settings, PartyPopper, ArrowRight,
+  FlaskConical, Building2, Settings, Palette, PartyPopper, ArrowRight,
 } from 'lucide-react'
 import { seccionesDe, SECCION_INFO, ROL_NOTA, esRol, type Seccion } from '~/lib/permisos'
 
@@ -16,6 +16,7 @@ const ICONO: Record<Seccion, any> = {
   laboratorio: FlaskConical,
   'trabajos-externos': Building2,
   configuracion: Settings,
+  apariencia: Palette,
 }
 
 /**

@@ -4,6 +4,7 @@ import type { Route } from './+types/configuracion'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
 import { requireSeccion } from '~/lib/clinica.server'
+import { puedeVer } from '~/lib/permisos'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -46,7 +47,15 @@ export function meta(): Route.MetaDescriptors {
 
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const { clinicaId } = await requireSeccion(request, 'configuracion')
+  // cualquiera entra a elegir su tema; el resto de los ajustes es de la clínica
+  const { clinicaId, rol } = await requireSeccion(request, 'apariencia')
+
+  // quien no gestiona la clínica solo recibe la pestaña de apariencia: no se
+  // consulta ni se envía nada de la clínica ni del equipo
+  if (!puedeVer(rol, 'configuracion')) {
+    return { soloApariencia: true as const }
+  }
+
   // RLS en `perfiles` solo permite ver la fila propia; el listado del equipo
   // completo requiere el cliente admin (siempre filtrado por clinica_id)
   const admin = createSupabaseAdminClient()
@@ -89,6 +98,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   }
 
   return {
+    soloApariencia: false as const,
     clinica: clinica as ClinicaData | null,
     doctores: (doctores ?? []) as Doctor[],
     tratamientos: (tratamientos ?? []) as Tratamiento[],
@@ -1216,8 +1226,20 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 // ─── main component ───────────────────────────────────────────────────────────
 
 export default function Configuracion({ loaderData }: Route.ComponentProps) {
-  const { clinica, doctores, tratamientos, perfiles, invitaciones, config, resendEstado } = loaderData
   const [searchParams, setSearchParams] = useSearchParams()
+
+  // quien no gestiona la clínica solo dispone de Apariencia
+  if (loaderData.soloApariencia) {
+    return (
+      <div className="p-4 md:p-8 max-w-2xl">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Apariencia</h1>
+        <p className="text-sm text-gray-400 mb-6">Cómo se ve la aplicación en este dispositivo</p>
+        <AparienciaSection />
+      </div>
+    )
+  }
+
+  const { clinica, doctores, tratamientos, perfiles, invitaciones, config, resendEstado } = loaderData
   const tab = (searchParams.get('tab') ?? 'clinica') as TabId
 
   return (

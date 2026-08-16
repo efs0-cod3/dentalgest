@@ -15,6 +15,7 @@ export type Seccion =
   | 'laboratorio'
   | 'trabajos-externos'
   | 'configuracion'
+  | 'apariencia'
 
 // Qué secciones puede abrir cada rol.
 //  - propietario/admin: todo (admin además atiende como doctor).
@@ -23,11 +24,11 @@ export type Seccion =
 //  - doctor: lo clínico que le corresponde (ver filtroPropio).
 //  - laboratorio: solo órdenes de laboratorio y trabajos externos.
 const ACCESO: Record<Rol, Seccion[]> = {
-  propietario: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos', 'configuracion'],
-  admin: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos', 'configuracion'],
-  recepcionista: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos'],
-  doctor: ['inicio', 'citas', 'consultas', 'pacientes', 'laboratorio'],
-  laboratorio: ['laboratorio', 'trabajos-externos'],
+  propietario: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos', 'configuracion', 'apariencia'],
+  admin: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos', 'configuracion', 'apariencia'],
+  recepcionista: ['inicio', 'citas', 'consultas', 'pacientes', 'caja', 'cotizaciones', 'laboratorio', 'trabajos-externos', 'apariencia'],
+  doctor: ['inicio', 'citas', 'consultas', 'pacientes', 'laboratorio', 'apariencia'],
+  laboratorio: ['laboratorio', 'trabajos-externos', 'apariencia'],
 }
 
 export function esRol(valor: string | null | undefined): valor is Rol {
@@ -50,6 +51,7 @@ export const SECCION_INFO: Record<Seccion, { label: string; desc: string }> = {
   laboratorio: { label: 'Laboratorio', desc: 'Órdenes enviadas al laboratorio y su estado de entrega.' },
   'trabajos-externos': { label: 'Trabajos externos', desc: 'Trabajos recibidos de otras clínicas o doctores.' },
   configuracion: { label: 'Configuración', desc: 'Datos de la clínica, equipo, doctores, tratamientos y agenda.' },
+  apariencia: { label: 'Apariencia', desc: 'Elige el tema claro u oscuro para este dispositivo.' },
 }
 
 // nota extra según el rol, para dejar claro el alcance de su acceso
@@ -83,6 +85,7 @@ export const RUTA_SECCION: Record<Seccion, string> = {
   laboratorio: '/dashboard/laboratorio',
   'trabajos-externos': '/dashboard/trabajos-externos',
   configuracion: '/dashboard/configuracion',
+  apariencia: '/dashboard/configuracion?tab=apariencia',
 }
 
 // El rol doctor solo ve lo suyo (sus citas, sus consultas, sus pacientes).
