@@ -47,6 +47,8 @@ type OdontogramaVersion = { id: string; datos: OdontogramaData; notas: string | 
 const MAX_DOCUMENTO_MB = 10
 const MAX_DOCUMENTO_BYTES = MAX_DOCUMENTO_MB * 1024 * 1024
 const DOCUMENTO_TIPOS_PERMITIDOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+// vigencia del enlace firmado con que se abren los documentos (1 hora)
+const DOCUMENTO_URL_TTL_SEG = 60 * 60
 
 const estadoStyle: Record<string, string> = {
   pendiente: 'bg-yellow-100 text-yellow-700', confirmada: 'bg-blue-100 text-blue-700',
@@ -92,14 +94,28 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   if (!data) throw redirect('/dashboard/pacientes')
 
+  // el bucket de documentos es privado (son datos de salud): el enlace se firma
+  // aquí y caduca, en vez de exponer una URL pública permanente
+  const documentosOrdenados: Documento[] = ((data as any).documentos ?? []).sort(
+    (a: Documento, b: Documento) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+  const documentos = await Promise.all(
+    documentosOrdenados.map(async d => {
+      if (!d.storage_path) return d
+      const { data: firmado } = await supabase.storage
+        .from('documentos')
+        .createSignedUrl(d.storage_path, DOCUMENTO_URL_TTL_SEG)
+      return { ...d, url: firmado?.signedUrl ?? d.url }
+    })
+  )
+
   const paciente: Paciente = {
     ...(data as any),
     citas: ((data as any).citas ?? []).sort((a: CitaPaciente, b: CitaPaciente) =>
       new Date(b.fecha_hora).getTime() - new Date(a.fecha_hora).getTime()),
     expediente_entradas: ((data as any).expediente_entradas ?? []).sort((a: ExpedienteEntrada, b: ExpedienteEntrada) =>
       new Date(b.fecha).getTime() - new Date(a.fecha).getTime()),
-    documentos: ((data as any).documentos ?? []).sort((a: Documento, b: Documento) =>
-      new Date(b.created_at).getTime() - new Date(a.created_at).getTime()),
+    documentos,
   }
 
   return {
@@ -166,12 +182,12 @@ export async function action({ request, params }: Route.ActionArgs) {
     const bytes = await archivo.arrayBuffer()
     const { error } = await supabase.storage.from('documentos').upload(path, bytes, { contentType: archivo.type })
     if (error) return { ok: false, error: error.message }
-    const { data: { publicUrl } } = supabase.storage.from('documentos').getPublicUrl(path)
     const { error: docError } = await supabase.from('documentos').insert({
       clinica_id: clinicaId, paciente_id: pacienteId,
       nombre: (fd.get('nombre') as string) || archivo.name,
       tipo: fd.get('tipo') as string,
-      url: publicUrl, storage_path: path,
+      // bucket privado: no se guarda URL pública, el enlace se firma al leer
+      url: path, storage_path: path,
     })
     if (docError) return { ok: false, error: docError.message }
     return { ok: true }
