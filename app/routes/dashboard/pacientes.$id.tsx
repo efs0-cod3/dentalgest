@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, redirect } from 'react-router'
 import type { Route } from './+types/pacientes.$id'
 import type { action as citasAction } from './citas'
@@ -534,14 +534,30 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
   const [deleteTarget, setDeleteTarget] = useState<Documento | null>(null)
   const navigation = useNavigation()
   const submit = useSubmit()
-  const isUploading = navigation.state === 'submitting'
+  // la subida va por su propio fetcher: así el resultado (éxito o error) es de
+  // este formulario y no se confunde con otras acciones de la ficha
+  const subida = useFetcher<typeof action>()
+  const subiendo = subida.state !== 'idle'
+  const formRef = useRef<HTMLFormElement>(null)
+  const [subido, setSubido] = useState(false)
   useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
+
+  // al terminar bien: limpiar el formulario y confirmar durante unos segundos
+  useEffect(() => {
+    if (subida.state === 'idle' && subida.data?.ok) {
+      formRef.current?.reset()
+      setSubido(true)
+      const id = window.setTimeout(() => setSubido(false), 4000)
+      return () => window.clearTimeout(id)
+    }
+  }, [subida.state, subida.data])
 
   return (
     <div className="space-y-4">
       <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Archivos y documentos</p>
 
-      <Form method="post" encType="multipart/form-data" className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-3">
+      <subida.Form ref={formRef} method="post" encType="multipart/form-data"
+        className="bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-3">
         <input type="hidden" name="intent" value="upload-documento" />
         <div className="grid grid-cols-3 gap-3">
           <div className="col-span-2">
@@ -563,13 +579,26 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
           <input type="text" name="nombre" placeholder="Ej. Radiografía panorámica junio 2026"
             className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
         </div>
+        {/* resultado de la subida: antes no se mostraba nada, ni siquiera los
+            errores que devuelve el servidor */}
+        {subido && (
+          <p className="flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+            <CheckCircle size={13} /> Archivo subido correctamente
+          </p>
+        )}
+        {subida.data?.ok === false && (
+          <p className="flex items-center gap-1.5 text-xs text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+            <AlertCircle size={13} className="flex-shrink-0" /> {subida.data.error}
+          </p>
+        )}
+
         <div className="flex justify-end">
-          <button type="submit" disabled={isUploading}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
-            <Upload size={13} /> {isUploading ? 'Subiendo…' : 'Subir archivo'}
+          <button type="submit" disabled={subiendo}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer disabled:cursor-default">
+            <Upload size={13} /> {subiendo ? 'Subiendo…' : 'Subir archivo'}
           </button>
         </div>
-      </Form>
+      </subida.Form>
 
       {paciente.documentos.length === 0 ? (
         <p className="text-sm text-gray-400 text-center py-6">Sin archivos adjuntos.</p>
