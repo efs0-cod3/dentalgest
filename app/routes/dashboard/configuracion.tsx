@@ -3,22 +3,32 @@ import { useSearchParams, useFetcher, Form } from 'react-router'
 import type { Route } from './+types/configuracion'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
-import { requireSeccion } from '~/lib/clinica.server'
+import { requireSeccion, getSesion } from '~/lib/clinica.server'
 import { puedeVer } from '~/lib/permisos'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { TemaSelector } from '~/components/TemaSelector'
+import { BUCKET_CLINICA, firmarImagen, revisarImagen, rutaFirma, rutaSello } from '~/lib/prescripciones.server'
+import { MAX_IMAGEN_BYTES } from '~/lib/prescripciones'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
   DollarSign, AlertTriangle, Plus, Pencil, Trash2, X, Check,
-  Download, LogOut, MessageCircle, Palette, KeyRound,
+  Download, LogOut, MessageCircle, Palette, KeyRound, IdCard, Upload,
 } from 'lucide-react'
 import { CambiarClaveForm } from '~/components/CambiarClaveForm'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
-type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'mi-cuenta' | 'apariencia' | 'peligro'
+// "Mi perfil" son los datos profesionales del doctor (exequátur, firma) y
+// "Mi cuenta" es la contraseña de acceso. Son cosas distintas y las ve gente
+// distinta, así que van en pestañas separadas.
+type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'mi-perfil' | 'mi-cuenta' | 'apariencia' | 'peligro'
+
+type MiDoctor = {
+  id: string; nombre: string; exequatur: string | null
+  especialidad: string | null; firma_path: string | null
+}
 
 type ClinicaData = {
   id: string; nombre: string; rnc: string | null
@@ -49,12 +59,23 @@ export function meta(): Route.MetaDescriptors {
 export async function loader({ request }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
   // cualquiera entra a elegir su tema; el resto de los ajustes es de la clínica
-  const { clinicaId, rol } = await requireSeccion(request, 'apariencia')
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'apariencia')
 
-  // quien no gestiona la clínica solo recibe la pestaña de apariencia: no se
-  // consulta ni se envía nada de la clínica ni del equipo
+  // Datos profesionales propios: hacen falta tanto para quien gestiona la
+  // clínica como para el rol doctor, que no entra al resto de los ajustes.
+  const { data: miDoctorRaw } = doctorId
+    ? await supabase.from('doctores').select('id,nombre,exequatur,especialidad,firma_path')
+        .eq('id', doctorId).eq('clinica_id', clinicaId).maybeSingle()
+    : { data: null }
+  const miDoctor = (miDoctorRaw as MiDoctor | null) ?? null
+  // la firma vive en un bucket privado: se muestra con una URL firmada
+  const firmaUrl = await firmarImagen(supabase as any, miDoctor?.firma_path)
+
+  // quien no gestiona la clínica solo recibe apariencia y, si está ligado a un
+  // doctor, sus datos profesionales: no se consulta nada de la clínica ni del
+  // equipo
   if (!puedeVer(rol, 'configuracion')) {
-    return { soloApariencia: true as const }
+    return { soloApariencia: true as const, miDoctor, firmaUrl }
   }
 
   // RLS en `perfiles` solo permite ver la fila propia; el listado del equipo
@@ -63,7 +84,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 
   const [{ data: clinica }, { data: doctores }, { data: tratamientos }, { data: perfiles }, { data: config }] =
     await Promise.all([
-      supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion').eq('id', clinicaId).single(),
+      supabase.from('clinicas').select('id,nombre,rnc,telefono,email,direccion,sello_path,logo_path').eq('id', clinicaId).single(),
       supabase.from('doctores').select('id,nombre,especialidad,color').eq('clinica_id', clinicaId).order('nombre'),
       supabase.from('tratamientos').select('id,nombre,precio,duracion_min,color').eq('clinica_id', clinicaId).order('nombre'),
       admin.from('perfiles').select('id,rol,email,nombre,doctor_id').eq('clinica_id', clinicaId),
@@ -108,6 +129,9 @@ export async function loader({ request }: Route.LoaderArgs) {
     config: (config ? { ...defaultConfig, ...config } : defaultConfig) as Config,
     clinicaId,
     resendEstado,
+    miDoctor,
+    firmaUrl,
+    selloUrl: await firmarImagen(supabase as any, (clinica as any)?.sello_path),
   }
 }
 
@@ -115,11 +139,60 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const { clinicaId } = await requireSeccion(request, 'configuracion')
   const fd = await request.formData()
   const intent = fd.get('intent') as string
 
+  // ── Mi perfil ───────────────────────────────────────────────────────────────
+  // Van antes del guarda de configuración, porque el rol doctor no entra ahí y
+  // sin embargo tiene que poder cargar su exequátur y su firma. Cada uno solo
+  // toca el registro de doctor al que está ligada SU cuenta.
+  if (intent === 'guardar_mi_perfil' || intent === 'subir_firma') {
+    const { clinicaId, doctorId } = await getSesion(request)
+    if (!doctorId) {
+      return { ok: false, error: 'Tu cuenta no está ligada a un doctor. Pide que la vinculen en Usuarios.', intent }
+    }
+
+    if (intent === 'guardar_mi_perfil') {
+      const { error } = await supabase.from('doctores').update({
+        exequatur: ((fd.get('exequatur') as string) ?? '').trim() || null,
+        especialidad: ((fd.get('especialidad') as string) ?? '').trim() || null,
+      }).eq('id', doctorId).eq('clinica_id', clinicaId)
+      return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+    }
+
+    const archivo = fd.get('firma') as File | null
+    const malo = revisarImagen(archivo)
+    if (malo) return { ok: false, error: malo, intent }
+
+    const ruta = rutaFirma(clinicaId, doctorId, archivo!)
+    const { error: subida } = await supabase.storage
+      .from(BUCKET_CLINICA)
+      .upload(ruta, archivo!, { upsert: true, contentType: archivo!.type })
+    if (subida) return { ok: false, error: subida.message, intent }
+
+    const { error } = await supabase.from('doctores')
+      .update({ firma_path: ruta }).eq('id', doctorId).eq('clinica_id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+  }
+
+  const { clinicaId } = await requireSeccion(request, 'configuracion')
+
   // Clínica
+  if (intent === 'subir_sello') {
+    const archivo = fd.get('sello') as File | null
+    const malo = revisarImagen(archivo)
+    if (malo) return { ok: false, error: malo, intent }
+
+    const ruta = rutaSello(clinicaId, archivo!)
+    const { error: subida } = await supabase.storage
+      .from(BUCKET_CLINICA)
+      .upload(ruta, archivo!, { upsert: true, contentType: archivo!.type })
+    if (subida) return { ok: false, error: subida.message, intent }
+
+    const { error } = await supabase.from('clinicas').update({ sello_path: ruta }).eq('id', clinicaId)
+    return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
+  }
+
   if (intent === 'update_clinica') {
     const { error } = await supabase.from('clinicas').update({
       nombre: fd.get('nombre') as string,
@@ -390,9 +463,11 @@ const inputCls = 'w-full px-3 py-2 text-sm text-gray-900 bg-white border border-
 
 // ─── section: Clínica ─────────────────────────────────────────────────────────
 
-function ClinicaSection({ clinica }: { clinica: ClinicaData | null }) {
+function ClinicaSection({ clinica, selloUrl }: { clinica: ClinicaData | null; selloUrl: string | null }) {
   const f = useFetcher()
   return (
+    <>
+    <SelloCard selloUrl={selloUrl} />
     <SectionCard title="Información de la clínica" description="Aparece en encabezados de presupuestos e impresiones">
       <f.Form method="post" className="space-y-4">
         <input type="hidden" name="intent" value="update_clinica" />
@@ -424,6 +499,133 @@ function ClinicaSection({ clinica }: { clinica: ClinicaData | null }) {
         </div>
       </f.Form>
     </SectionCard>
+    </>
+  )
+}
+
+// ─── section: Sello de la clínica ─────────────────────────────────────────────
+
+/** Imagen reutilizable para firma y sello: previsualización + carga. */
+function ImagenCard({
+  titulo, descripcion, intent, campo, url, alto, ayuda, deshabilitado,
+}: {
+  titulo: string
+  descripcion: string
+  intent: string
+  campo: string
+  url: string | null
+  alto: string
+  ayuda: string
+  deshabilitado?: string | null
+}) {
+  const f = useFetcher<{ ok: boolean; error?: string; intent?: string }>()
+  return (
+    <SectionCard title={titulo} description={descripcion}>
+      {deshabilitado ? (
+        <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">{deshabilitado}</p>
+      ) : (
+        <div className="space-y-3">
+          <div className={cn(
+            'flex items-center justify-center rounded-xl border border-dashed border-gray-300 bg-gray-50 p-3',
+            alto,
+          )}>
+            {url
+              ? <img src={url} alt="" className="max-h-full max-w-full object-contain" />
+              : <span className="text-xs text-gray-400">Sin imagen cargada</span>}
+          </div>
+
+          <f.Form method="post" encType="multipart/form-data" className="space-y-2">
+            <input type="hidden" name="intent" value={intent} />
+            <input type="file" name={campo} accept="image/png,image/jpeg" required
+              className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 file:cursor-pointer cursor-pointer" />
+            <p className="text-xs text-gray-400">{ayuda}</p>
+            <div className="flex items-center gap-3">
+              <button type="submit" disabled={f.state !== 'idle'}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
+                <Upload size={13} /> {f.state !== 'idle' ? 'Subiendo…' : 'Subir'}
+              </button>
+              <FeedbackMsg data={f.data} />
+            </div>
+          </f.Form>
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
+function SelloCard({ selloUrl }: { selloUrl: string | null }) {
+  return (
+    <ImagenCard
+      titulo="Sello de la clínica"
+      descripcion="Se imprime junto a la firma del doctor en las recetas"
+      intent="subir_sello"
+      campo="sello"
+      url={selloUrl}
+      alto="h-28"
+      ayuda={`PNG con fondo transparente, hasta ${Math.round(MAX_IMAGEN_BYTES / 1024)} KB. Se guarda en privado: nunca queda en una URL pública.`}
+    />
+  )
+}
+
+// ─── section: Mi perfil ───────────────────────────────────────────────────────
+
+function MiPerfilSection({ miDoctor, firmaUrl }: { miDoctor: MiDoctor | null; firmaUrl: string | null }) {
+  const f = useFetcher<{ ok: boolean; error?: string; intent?: string }>()
+
+  if (!miDoctor) {
+    return (
+      <SectionCard title="Mi perfil" description="Tus datos profesionales para las recetas">
+        <p className="text-sm text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          Tu cuenta no está ligada a ningún doctor, así que no hay datos profesionales que cargar.
+          Un propietario o admin puede vincularla en <b>Usuarios</b>.
+        </p>
+      </SectionCard>
+    )
+  }
+
+  const sinExequatur = (miDoctor.exequatur ?? '').trim() === ''
+
+  return (
+    <>
+      <SectionCard title="Datos profesionales" description={`Se imprimen en las recetas que emitas como ${miDoctor.nombre}`}>
+        {sinExequatur && (
+          <p className="mb-4 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+            Sin exequátur no podrás emitir recetas. Es el requisito legal, así que lo valida también la base de datos.
+          </p>
+        )}
+        <f.Form method="post" className="space-y-4">
+          <input type="hidden" name="intent" value="guardar_mi_perfil" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Exequátur
+              </label>
+              <input name="exequatur" defaultValue={miDoctor.exequatur ?? ''} placeholder="Ej. 12345-6" className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Especialidad
+              </label>
+              <input name="especialidad" defaultValue={miDoctor.especialidad ?? ''} placeholder="Odontología general" className={inputCls} />
+            </div>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <SaveBtn loading={f.state !== 'idle'} />
+            <FeedbackMsg data={f.data} />
+          </div>
+        </f.Form>
+      </SectionCard>
+
+      <ImagenCard
+        titulo="Mi firma"
+        descripcion="Se imprime sobre la línea de firma. Solo tú puedes cargar la tuya"
+        intent="subir_firma"
+        campo="firma"
+        url={firmaUrl}
+        alto="h-24"
+        ayuda={`PNG con fondo transparente, hasta ${Math.round(MAX_IMAGEN_BYTES / 1024)} KB. Se guarda en privado: nunca queda en una URL pública.`}
+      />
+    </>
   )
 }
 
@@ -1234,6 +1436,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'agenda', label: 'Agenda', icon: Calendar },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'caja', label: 'Caja', icon: DollarSign },
+  { id: 'mi-perfil', label: 'Mi perfil', icon: IdCard },
   { id: 'mi-cuenta', label: 'Mi cuenta', icon: KeyRound },
   { id: 'apariencia', label: 'Apariencia', icon: Palette },
   { id: 'peligro', label: 'Zona de peligro', icon: AlertTriangle },
@@ -1244,11 +1447,19 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 export default function Configuracion({ loaderData }: Route.ComponentProps) {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // Quien no gestiona la clínica dispone de Apariencia y de su propia cuenta:
-  // la contraseña la cambia todo el mundo, no solo propietario y admin.
+  // Quien no gestiona la clínica dispone de Apariencia, de su contraseña y,
+  // si está ligado a un registro de doctor, de sus datos profesionales para
+  // poder emitir recetas. Nada de eso es cosa de un admin.
   if (loaderData.soloApariencia) {
     return (
       <div className="p-4 md:p-8 max-w-2xl space-y-8">
+        {loaderData.miDoctor && (
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 mb-1">Mi perfil</h1>
+            <p className="text-sm text-gray-400 mb-6">Tus datos profesionales para las recetas</p>
+            <MiPerfilSection miDoctor={loaderData.miDoctor} firmaUrl={loaderData.firmaUrl} />
+          </div>
+        )}
         <div>
           <h1 className="text-2xl font-bold text-gray-900 mb-1">Mi cuenta</h1>
           <p className="text-sm text-gray-400 mb-6">Tu contraseña de acceso</p>
@@ -1263,7 +1474,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
     )
   }
 
-  const { clinica, doctores, tratamientos, perfiles, invitaciones, config, resendEstado } = loaderData
+  const { clinica, doctores, tratamientos, perfiles, invitaciones, config, resendEstado, miDoctor, firmaUrl, selloUrl } = loaderData
   const tab = (searchParams.get('tab') ?? 'clinica') as TabId
 
   return (
@@ -1312,13 +1523,14 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
       {/* content */}
       <div className="flex-1 overflow-auto p-4 md:p-6">
         <div className="max-w-2xl space-y-4">
-          {tab === 'clinica' && <ClinicaSection clinica={clinica} />}
+          {tab === 'clinica' && <ClinicaSection clinica={clinica} selloUrl={selloUrl} />}
           {tab === 'usuarios' && <UsuariosSection perfiles={perfiles} doctores={doctores} invitaciones={invitaciones} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'doctores' && <DoctoresSection doctores={doctores} />}
           {tab === 'tratamientos' && <TratamientosSection tratamientos={tratamientos} />}
           {tab === 'agenda' && <AgendaSection config={config} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'notificaciones' && <NotificacionesSection config={config} resendEstado={resendEstado} />}
           {tab === 'caja' && <CajaSection config={config} />}
+          {tab === 'mi-perfil' && <MiPerfilSection miDoctor={miDoctor} firmaUrl={firmaUrl} />}
           {tab === 'mi-cuenta' && <MiCuentaSection />}
           {tab === 'apariencia' && <AparienciaSection />}
           {tab === 'peligro' && <PeligroSection />}

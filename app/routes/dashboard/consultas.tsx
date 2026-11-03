@@ -5,13 +5,15 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { filtroPropio } from '~/lib/permisos'
 import {
-  Plus, X, Pencil, Trash2, Search, Eye, Download, Stethoscope, Calendar,
+  Plus, X, Pencil, Trash2, Search, Eye, Download, Stethoscope, Calendar, Pill,
 } from 'lucide-react'
 import { cn, calcularEdad } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { Cie10Selector, aSeleccionados } from '~/components/Cie10Selector'
 import { etiquetaDiagnostico, titularEntrada, type DiagnosticoGuardado } from '~/lib/cie10'
 import { revisarDiagnosticosDelFormulario, guardarDiagnosticos } from '~/lib/cie10.server'
+import { RecetaFormModal } from '~/components/RecetaFormModal'
+import { contextoReceta, revisarPuedeEmitir } from '~/lib/prescripciones.server'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -49,6 +51,11 @@ export async function loader({ request }: Route.LoaderArgs) {
   // el rol doctor solo ve las consultas que él registró
   const soloPropias = filtroPropio(rol) && doctorId
 
+  // ¿puede esta persona emitir recetas? (rol clínico + ligada a un doctor +
+  // exequátur cargado). Si no, el botón explica qué falta en vez de esconderse.
+  const { doctor } = await contextoReceta(supabase as any, clinicaId, doctorId)
+  const motivoNoReceta = revisarPuedeEmitir(rol, doctor)
+
   const [{ data: consultas }, { data: pacientes }, { data: doctores }] = await Promise.all([
     (() => {
       const q = supabase.from('expediente_entradas')
@@ -64,6 +71,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     consultas: (consultas ?? []) as unknown as Consulta[],
     pacientes: (pacientes ?? []) as Paciente[],
     doctores: (doctores ?? []) as Doctor[],
+    motivoNoReceta,
   }
 }
 
@@ -241,8 +249,9 @@ function ConsultaFormModal({ consulta, pacientes, doctores, onClose }: {
 
 // ─── detalle modal (ver) ────────────────────────────────────────────────────────
 
-function ConsultaDetalleModal({ consulta, onClose, onEdit }: {
+function ConsultaDetalleModal({ consulta, onClose, onEdit, onReceta, motivoNoReceta }: {
   consulta: Consulta; onClose: () => void; onEdit: () => void
+  onReceta: () => void; motivoNoReceta: string | null
 }) {
   const paciente = consulta.pacientes
   return (
@@ -295,12 +304,22 @@ function ConsultaDetalleModal({ consulta, onClose, onEdit }: {
           </div>
         </div>
 
-        <div className="px-6 py-4 border-t border-gray-100 flex justify-end flex-shrink-0">
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 flex-shrink-0">
+          {consulta.paciente_id ? (
+            <button onClick={onReceta} disabled={!!motivoNoReceta}
+              title={motivoNoReceta ?? 'Emitir una receta para este paciente'}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 cursor-pointer disabled:cursor-default transition-colors">
+              <Pill size={13} /> Crear receta
+            </button>
+          ) : <span />}
           <button onClick={onEdit}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer transition-colors">
             <Pencil size={13} /> Editar
           </button>
         </div>
+        {motivoNoReceta && consulta.paciente_id && (
+          <p className="px-6 pb-4 -mt-2 text-xs text-gray-400 flex-shrink-0">{motivoNoReceta}</p>
+        )}
       </div>
     </div>
   )
@@ -309,7 +328,7 @@ function ConsultaDetalleModal({ consulta, onClose, onEdit }: {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function Consultas() {
-  const { consultas, pacientes, doctores } = useLoaderData<typeof loader>()
+  const { consultas, pacientes, doctores, motivoNoReceta } = useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const submit = useSubmit()
 
@@ -322,6 +341,7 @@ export default function Consultas() {
 
   const [formModal, setFormModal] = useState<{ open: boolean; consulta: Consulta | null }>({ open: false, consulta: null })
   const [detalle, setDetalle] = useState<Consulta | null>(null)
+  const [receta, setReceta] = useState<Consulta | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Consulta | null>(null)
   useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
@@ -534,7 +554,9 @@ export default function Consultas() {
       )}
       {detalle && (
         <ConsultaDetalleModal consulta={detalle} onClose={() => setDetalle(null)}
-          onEdit={() => { setFormModal({ open: true, consulta: detalle }); setDetalle(null) }} />
+          onEdit={() => { setFormModal({ open: true, consulta: detalle }); setDetalle(null) }}
+          motivoNoReceta={motivoNoReceta}
+          onReceta={() => { setReceta(detalle); setDetalle(null) }} />
       )}
       {deleteTarget && (
         <ConfirmDeleteModal
@@ -544,6 +566,14 @@ export default function Consultas() {
           isSubmitting={navigation.state === 'submitting'}
           onCancel={() => setDeleteTarget(null)}
           onConfirm={() => submit({ intent: 'delete', id: deleteTarget.id }, { method: 'post' })}
+        />
+      )}
+      {receta?.paciente_id && (
+        <RecetaFormModal
+          pacienteId={receta.paciente_id}
+          pacienteNombre={receta.pacientes?.nombre ?? 'Paciente'}
+          consultaId={receta.id}
+          onClose={() => setReceta(null)}
         />
       )}
     </div>
