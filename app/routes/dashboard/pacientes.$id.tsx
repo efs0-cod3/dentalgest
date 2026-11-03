@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, redirect } from 'react-router'
+import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, useActionData, redirect } from 'react-router'
 import type { Route } from './+types/pacientes.$id'
 import type { action as citasAction } from './citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
@@ -14,6 +14,9 @@ import { cn, drLocalToUTC, calcularEdad } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { PacienteEditModal } from '~/components/PacienteEditModal'
+import { Cie10Selector } from '~/components/Cie10Selector'
+import { etiquetaDiagnostico, titularEntrada, type DiagnosticoGuardado } from '~/lib/cie10'
+import { revisarDiagnosticosDelFormulario, guardarDiagnosticos } from '~/lib/cie10.server'
 import { Odontograma } from '~/components/Odontograma'
 import type { OdontogramaData } from '~/components/Odontograma'
 
@@ -25,6 +28,7 @@ type CitaPaciente = {
 }
 type ExpedienteEntrada = {
   id: string; fecha: string; tipo: string; titulo: string; descripcion: string | null
+  entrada_clinica_diagnosticos: DiagnosticoGuardado[]
   doctores: { nombre: string } | null
 }
 type Documento = {
@@ -82,7 +86,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
       tipo_sangre, alergias, antecedentes_medicos,
       contacto_emergencia_nombre, contacto_emergencia_telefono, contacto_emergencia_relacion,
       citas(id, fecha_hora, duracion_min, estado, notas, doctores(nombre), tratamientos(nombre)),
-      expediente_entradas(id, fecha, tipo, titulo, descripcion, doctores(nombre)),
+      expediente_entradas(id, fecha, tipo, titulo, descripcion, doctores(nombre), entrada_clinica_diagnosticos(cie10_codigo, pieza_dental, notas, cie10_codigos(descripcion))),
       documentos(id, nombre, tipo, url, storage_path, created_at)
     `).eq('id', pacienteId).eq('clinica_id', clinicaId).single(),
     supabase.from('doctores').select('id,nombre').eq('clinica_id', clinicaId).order('nombre'),
@@ -155,16 +159,26 @@ export async function action({ request, params }: Route.ActionArgs) {
   }
 
   if (intent === 'create-entrada') {
-    const { error } = await supabase.from('expediente_entradas').insert({
+    const titulo = ((fd.get('titulo') as string) ?? '').trim()
+
+    // Se revisan los códigos CIE-10 antes de escribir nada, igual que en el
+    // modal de Consultas, e incluye la regla de "al menos uno de los dos".
+    const revision = await revisarDiagnosticosDelFormulario(supabase, fd, titulo)
+    if (!revision.ok) return { ok: false, error: revision.error }
+
+    const { data: creada, error } = await supabase.from('expediente_entradas').insert({
       clinica_id: clinicaId,
       paciente_id: pacienteId,
       doctor_id: (fd.get('doctor_id') as string) || null,
       fecha: fd.get('fecha') as string,
       tipo: fd.get('tipo') as string,
-      titulo: fd.get('titulo') as string,
+      titulo,
       descripcion: (fd.get('descripcion') as string) || null,
-    })
+    }).select('id').single()
     if (error) return { ok: false, error: error.message }
+
+    const fallo = await guardarDiagnosticos(supabase, creada.id as string, revision.diagnosticos)
+    if (fallo) return { ok: false, error: fallo }
     return { ok: true }
   }
 
@@ -435,7 +449,17 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
   const navigation = useNavigation()
   const submit = useSubmit()
   const isSubmitting = navigation.state === 'submitting'
-  useCloseOnSubmit(() => setShowForm(false))
+  const actionData = useActionData<typeof action>()
+  // no se usa useCloseOnSubmit: cerraría el formulario también cuando el
+  // servidor rechaza la entrada, y el doctor perdería lo que escribió
+  const wasSubmitting = useRef(false)
+  useEffect(() => {
+    if (navigation.state === 'submitting') wasSubmitting.current = true
+    else if (navigation.state === 'idle' && wasSubmitting.current) {
+      wasSubmitting.current = false
+      if (actionData?.ok !== false) setShowForm(false)
+    }
+  }, [navigation.state])
   useEffect(() => { if (navigation.state === 'idle') setDeleteTarget(null) }, [navigation.state])
 
   return (
@@ -474,15 +498,25 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Título <span className="text-red-500">*</span></label>
-            <input type="text" name="titulo" required placeholder="Ej. Caries en molar inferior derecho"
+            <label className="block text-xs font-medium text-gray-600 mb-1">Diagnóstico (CIE-10)</label>
+            <Cie10Selector />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notas del diagnóstico</label>
+            <input type="text" name="titulo" placeholder="Ej. Caries en molar inferior derecho"
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-xs text-gray-400 mt-1">Hace falta al menos un código CIE-10 o estas notas.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Descripción</label>
             <textarea name="descripcion" rows={2} placeholder="Detalles adicionales…"
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
           </div>
+          {actionData?.ok === false && 'error' in actionData && actionData.error && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              {actionData.error}
+            </p>
+          )}
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowForm(false)} className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-200 rounded-lg transition-colors">Cancelar</button>
             <button type="submit" disabled={isSubmitting} className="px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
@@ -502,7 +536,14 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
               <span className={cn('px-2 py-0.5 rounded-full text-xs font-medium capitalize', tipoEntradaStyle[e.tipo])}>{e.tipo}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900">{e.titulo}</p>
+              <p className="text-sm font-medium text-gray-900">{titularEntrada(e.titulo, e.entrada_clinica_diagnosticos)}</p>
+              {/* los códigos a partir del segundo, para no repetir el titular */}
+              {(e.entrada_clinica_diagnosticos ?? []).slice(1).map((d, i) => (
+                <p key={`${d.cie10_codigo}-${i}`} className="text-xs text-gray-600">{etiquetaDiagnostico(d)}</p>
+              ))}
+              {e.entrada_clinica_diagnosticos?.length > 0 && e.titulo && (
+                <p className="text-xs text-gray-500 mt-0.5">{e.titulo}</p>
+              )}
               {e.descripcion && <p className="text-xs text-gray-500 mt-0.5">{e.descripcion}</p>}
               <p className="text-xs text-gray-400 mt-1">
                 {fmtDateTime(e.fecha)}{e.doctores ? ` · ${e.doctores.nombre}` : ''}
@@ -517,7 +558,7 @@ function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doct
       {deleteTarget && (
         <ConfirmDeleteModal
           title="Eliminar entrada clínica"
-          itemLabel={deleteTarget.titulo}
+          itemLabel={titularEntrada(deleteTarget.titulo, deleteTarget.entrada_clinica_diagnosticos)}
           description={`${deleteTarget.tipo.charAt(0).toUpperCase() + deleteTarget.tipo.slice(1)} · ${fmtDateTime(deleteTarget.fecha)}${deleteTarget.doctores ? ` · ${deleteTarget.doctores.nombre}` : ''}. Esta acción no se puede deshacer.`}
           isSubmitting={isSubmitting}
           onCancel={() => setDeleteTarget(null)}

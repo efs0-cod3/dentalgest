@@ -9,6 +9,9 @@ import {
 } from 'lucide-react'
 import { cn, calcularEdad } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
+import { Cie10Selector, aSeleccionados } from '~/components/Cie10Selector'
+import { etiquetaDiagnostico, titularEntrada, type DiagnosticoGuardado } from '~/lib/cie10'
+import { revisarDiagnosticosDelFormulario, guardarDiagnosticos } from '~/lib/cie10.server'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -18,6 +21,7 @@ type Consulta = {
   paciente_id: string | null; doctor_id: string | null
   pacientes: PacienteRef | null
   doctores: { nombre: string } | null
+  entrada_clinica_diagnosticos: DiagnosticoGuardado[]
 }
 type Paciente = { id: string; nombre: string; fecha_nacimiento: string | null; cedula: string | null }
 type Doctor = { id: string; nombre: string }
@@ -48,7 +52,7 @@ export async function loader({ request }: Route.LoaderArgs) {
   const [{ data: consultas }, { data: pacientes }, { data: doctores }] = await Promise.all([
     (() => {
       const q = supabase.from('expediente_entradas')
-        .select('id,fecha,tipo,titulo,descripcion,plan,paciente_id,doctor_id,pacientes(id,nombre,fecha_nacimiento,cedula),doctores(nombre)')
+        .select('id,fecha,tipo,titulo,descripcion,plan,paciente_id,doctor_id,pacientes(id,nombre,fecha_nacimiento,cedula),doctores(nombre),entrada_clinica_diagnosticos(cie10_codigo,pieza_dental,notas,cie10_codigos(descripcion))')
         .eq('clinica_id', clinicaId)
       return (soloPropias ? q.eq('doctor_id', doctorId) : q).order('fecha', { ascending: false })
     })(),
@@ -80,26 +84,41 @@ export async function action({ request }: Route.ActionArgs) {
   const pacienteId = fd.get('paciente_id') as string
   if (!pacienteId) return { ok: false, error: 'Selecciona un paciente.' }
 
+  const titulo = ((fd.get('titulo') as string) ?? '').trim()
+
+  // Diagnósticos CIE-10: se revisan ANTES de escribir nada, para que un código
+  // inventado no llegue nunca a la base. Aquí también se aplica la regla de
+  // "al menos uno de los dos" (código o texto libre).
+  const revision = await revisarDiagnosticosDelFormulario(supabase, fd, titulo)
+  if (!revision.ok) return { ok: false, error: revision.error }
+
   const data = {
     clinica_id: clinicaId,
     paciente_id: pacienteId,
     doctor_id: (fd.get('doctor_id') as string) || null,
     fecha: fd.get('fecha') as string,
     tipo: fd.get('tipo') as string,
-    titulo: fd.get('titulo') as string,
+    titulo,
     descripcion: (fd.get('descripcion') as string) || null,
     plan: (fd.get('plan') as string) || null,
   }
 
   if (intent === 'create') {
-    const { error } = await supabase.from('expediente_entradas').insert(data)
+    const { data: creada, error } = await supabase
+      .from('expediente_entradas').insert(data).select('id').single()
     if (error) return { ok: false, error: error.message }
+    const fallo = await guardarDiagnosticos(supabase, creada.id as string, revision.diagnosticos)
+    if (fallo) return { ok: false, error: fallo }
     return { ok: true }
   }
   if (intent === 'update') {
+    const entradaId = fd.get('id') as string
     const { error } = await supabase.from('expediente_entradas')
-      .update(data).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+      .update(data).eq('id', entradaId).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message }
+    // reemplaza el conjunto completo: borra los que se quitaron, inserta los nuevos
+    const fallo = await guardarDiagnosticos(supabase, entradaId, revision.diagnosticos)
+    if (fallo) return { ok: false, error: fallo }
     return { ok: true }
   }
 
@@ -173,11 +192,25 @@ function ConsultaFormModal({ consulta, pacientes, doctores, onClose }: {
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Diagnóstico <span className="text-red-500">*</span></label>
-            <input type="text" name="titulo" required defaultValue={consulta?.titulo ?? ''}
+            <label className="block text-xs font-medium text-gray-600 mb-1">Diagnóstico (CIE-10)</label>
+            <Cie10Selector defaultValue={aSeleccionados(consulta?.entrada_clinica_diagnosticos)} />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Notas del diagnóstico</label>
+            <input type="text" name="titulo" defaultValue={consulta?.titulo ?? ''}
               placeholder="Ej. Caries en molar inferior derecho"
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            <p className="text-xs text-gray-400 mt-1">
+              Hace falta al menos un código CIE-10 o estas notas.
+            </p>
           </div>
+
+          {actionData?.ok === false && actionData.error && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+              {actionData.error}
+            </p>
+          )}
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Descripción breve</label>
@@ -236,7 +269,19 @@ function ConsultaDetalleModal({ consulta, onClose, onEdit }: {
 
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Diagnóstico</p>
-            <p className="text-sm font-medium text-gray-900">{consulta.titulo}</p>
+            {consulta.entrada_clinica_diagnosticos?.length > 0 ? (
+              <ul className="space-y-1 mb-2">
+                {consulta.entrada_clinica_diagnosticos.map((d, i) => (
+                  <li key={`${d.cie10_codigo}-${i}`} className="text-sm text-gray-900">
+                    <span className="font-medium">{etiquetaDiagnostico(d)}</span>
+                    {d.notas && <span className="text-gray-500"> · {d.notas}</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 mb-2">Sin codificar</p>
+            )}
+            {consulta.titulo && <p className="text-sm text-gray-700">{consulta.titulo}</p>}
           </div>
 
           <div>
@@ -289,7 +334,10 @@ export default function Consultas() {
       if (fechaDesde && new Date(c.fecha) < new Date(fechaDesde)) return false
       if (fechaHasta && new Date(c.fecha) > new Date(`${fechaHasta}T23:59:59`)) return false
       if (q) {
-        const haystack = `${c.pacientes?.nombre ?? ''} ${c.titulo} ${c.descripcion ?? ''} ${c.plan ?? ''}`.toLowerCase()
+        const codigos = (c.entrada_clinica_diagnosticos ?? [])
+          .map(d => `${d.cie10_codigo} ${d.cie10_codigos?.descripcion ?? ''}`)
+          .join(' ')
+        const haystack = `${c.pacientes?.nombre ?? ''} ${c.titulo} ${codigos} ${c.descripcion ?? ''} ${c.plan ?? ''}`.toLowerCase()
         if (!haystack.includes(q)) return false
       }
       return true
@@ -411,7 +459,10 @@ export default function Consultas() {
                     </td>
                     <td className="px-4 py-3 align-top max-w-[220px]">
                       <span className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize mb-1', tipoStyle[c.tipo])}>{c.tipo}</span>
-                      <p className="text-gray-900 truncate">{c.titulo}</p>
+                      <p className="text-gray-900 truncate">{titularEntrada(c.titulo, c.entrada_clinica_diagnosticos)}</p>
+                      {c.entrada_clinica_diagnosticos?.length === 0 && (
+                        <p className="text-[10px] text-gray-300 mt-0.5">sin codificar</p>
+                      )}
                     </td>
                     <td className="px-4 py-3 align-top max-w-[240px]">
                       <p className="text-gray-600 truncate">{c.descripcion || '—'}</p>
@@ -460,7 +511,10 @@ export default function Consultas() {
                     <span className="text-xs text-gray-400 flex-shrink-0">{fmtDate(c.fecha)}</span>
                   </div>
                   <span className={cn('inline-flex px-2 py-0.5 rounded-full text-xs font-medium capitalize mb-1', tipoStyle[c.tipo])}>{c.tipo}</span>
-                  <p className="text-sm text-gray-900 truncate">{c.titulo}</p>
+                  <p className="text-sm text-gray-900 truncate">{titularEntrada(c.titulo, c.entrada_clinica_diagnosticos)}</p>
+                  {c.entrada_clinica_diagnosticos?.length === 0 && (
+                    <p className="text-[10px] text-gray-300">sin codificar</p>
+                  )}
                   <div className="flex items-center gap-2 mt-2" onClick={e => e.stopPropagation()}>
                     <button onClick={() => setFormModal({ open: true, consulta: c })}
                       className="p-1.5 text-gray-300 hover:text-blue-600"><Pencil size={14} /></button>
@@ -485,7 +539,7 @@ export default function Consultas() {
       {deleteTarget && (
         <ConfirmDeleteModal
           title="Eliminar consulta"
-          itemLabel={deleteTarget.titulo}
+          itemLabel={titularEntrada(deleteTarget.titulo, deleteTarget.entrada_clinica_diagnosticos)}
           description={`${deleteTarget.pacientes?.nombre ?? 'Sin paciente'} · ${fmtDateTime(deleteTarget.fecha)}. Esta acción no se puede deshacer.`}
           isSubmitting={navigation.state === 'submitting'}
           onCancel={() => setDeleteTarget(null)}
