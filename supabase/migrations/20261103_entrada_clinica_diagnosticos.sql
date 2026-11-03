@@ -5,10 +5,20 @@
 -- toca: sigue existiendo como "Notas del diagnóstico" y las entradas antiguas
 -- se siguen viendo igual.
 
+-- Necesario para la llave foránea compuesta de abajo: garantiza que un
+-- diagnóstico no pueda colgar de una entrada de OTRA clínica. Sin esto, la
+-- RLS sola no basta — solo mira el clinica_id de la propia fila, así que un
+-- usuario de la clínica B podría insertar un diagnóstico suyo apuntando a una
+-- entrada de la clínica A. Comprobado contra la base real.
+alter table public.expediente_entradas
+  drop constraint if exists expediente_entradas_id_clinica_key;
+alter table public.expediente_entradas
+  add constraint expediente_entradas_id_clinica_key unique (id, clinica_id);
+
 create table if not exists public.entrada_clinica_diagnosticos (
   id            uuid primary key default gen_random_uuid(),
   clinica_id    uuid not null references public.clinicas(id) on delete cascade,
-  entrada_id    uuid not null references public.expediente_entradas(id) on delete cascade,
+  entrada_id    uuid not null,
   cie10_codigo  text not null references public.cie10_codigos(codigo),
   pieza_dental  smallint,
   notas         text,
@@ -20,7 +30,15 @@ create table if not exists public.entrada_clinica_diagnosticos (
     pieza_dental is null
     or (pieza_dental / 10 between 1 and 4 and pieza_dental % 10 between 1 and 8)
     or (pieza_dental / 10 between 5 and 8 and pieza_dental % 10 between 1 and 5)
-  )
+  ),
+
+  -- Compuesta a propósito: el diagnóstico y su entrada tienen que ser de la
+  -- misma clínica. Lo garantiza la estructura, no la política, así que sigue
+  -- valiendo aunque mañana alguien afloje la RLS.
+  constraint entrada_clinica_diagnosticos_entrada_fkey
+    foreign key (entrada_id, clinica_id)
+    references public.expediente_entradas (id, clinica_id)
+    on delete cascade
 );
 
 comment on table  public.entrada_clinica_diagnosticos is 'Diagnósticos CIE-10 de una entrada clínica. Varios por entrada.';
