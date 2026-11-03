@@ -4,6 +4,7 @@ export default [
   index('routes/home.tsx'),
   route('login', 'routes/login.tsx'),
   route('recuperar', 'routes/recuperar.tsx'),
+  route('cambiar-clave', 'routes/cambiar-clave.tsx'),
   route('auth/confirmar', 'routes/auth.confirmar.tsx'),
   route('logout', 'routes/logout.tsx'),
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
