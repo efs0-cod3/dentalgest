@@ -123,6 +123,7 @@ export default function AuthConfirmar() {
         ) : (
           <f.Form method="post" className="space-y-4">
             <input type="hidden" name="intent" value="set_password" />
+            <input type="hidden" name="flow" value={recovery ? 'recovery' : 'invite'} />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="password">
                 {recovery ? 'Nueva contraseña' : 'Crea tu contraseña'}
@@ -140,7 +141,7 @@ export default function AuthConfirmar() {
             {passwordError && <p className="text-sm text-red-600">{passwordError}</p>}
             <button type="submit" disabled={f.state !== 'idle'}
               className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
-              {f.state !== 'idle' ? 'Guardando…' : 'Guardar y entrar'}
+              {f.state !== 'idle' ? 'Guardando…' : recovery ? 'Guardar nueva contraseña' : 'Guardar y entrar'}
             </button>
           </f.Form>
         )}
