@@ -30,10 +30,13 @@ export type ClienteExterno = {
   rnc: string | null; notas: string | null; created_at: string
 }
 
+/** Foto de un trabajo: la ruta en Storage y su URL firmada para mostrarla. */
+export type FotoTrabajo = { path: string; url: string }
+
 export type TrabajoExterno = {
   id: string; cliente_externo_id: string
   paciente_referencia: string | null; tipo_trabajo: string; material: string | null
-  notas: string | null; fotos: string[]; estado: EstadoTrabajo
+  notas: string | null; fotos: FotoTrabajo[]; estado: EstadoTrabajo
   fecha_recibido: string; fecha_prometida: string | null; fecha_entregado: string | null
   precio: number | null; factura_id: string | null
   verification_token: string; created_at: string
@@ -76,10 +79,22 @@ const TIPOS_TRABAJO = [
 ]
 const FOTOS_BUCKET = 'externos'
 
-function photoStoragePath(url: string) {
+// El bucket es privado: las fotos se muestran con URLs firmadas de corta
+// duración generadas en el loader, no por URL pública.
+const FOTO_URL_TTL_SEG = 60 * 60
+
+/**
+ * `fotos` guarda la ruta en Storage. Las filas anteriores a que el bucket se
+ * volviera privado guardaban la URL pública completa, así que se acepta
+ * cualquiera de las dos formas y se devuelve siempre la ruta.
+ */
+function photoStoragePath(entrada: string): string | null {
+  if (!entrada) return null
   const marker = `/public/${FOTOS_BUCKET}/`
-  const i = url.indexOf(marker)
-  return i === -1 ? null : url.slice(i + marker.length)
+  const i = entrada.indexOf(marker)
+  if (i !== -1) return entrada.slice(i + marker.length)
+  // ya es una ruta; una URL de otro origen no se toca
+  return entrada.startsWith('http') ? null : entrada
 }
 
 // ─── meta ─────────────────────────────────────────────────────────────────────
@@ -105,6 +120,24 @@ export async function loader({ request }: Route.LoaderArgs) {
     ).eq('clinica_id', clinicaId).order('fecha_emision', { ascending: false }),
     supabase.from('config_clinica').select('recibo_whatsapp_habilitado').eq('clinica_id', clinicaId).maybeSingle(),
   ])
+  // El bucket de fotos es privado (son trabajos de pacientes identificables):
+  // cada enlace se firma aquí y caduca, en vez de exponer una URL pública.
+  const trabajosConFotos = await Promise.all(
+    ((trabajos ?? []) as any[]).map(async t => {
+      const entradas = (t.fotos as string[] | null) ?? []
+      const fotos: FotoTrabajo[] = []
+      for (const entrada of entradas) {
+        const path = photoStoragePath(entrada)
+        if (!path) continue
+        const { data: firmado } = await supabase.storage
+          .from(FOTOS_BUCKET)
+          .createSignedUrl(path, FOTO_URL_TTL_SEG)
+        if (firmado?.signedUrl) fotos.push({ path, url: firmado.signedUrl })
+      }
+      return { ...t, fotos }
+    }),
+  )
+
   // el rol laboratorio no ve importes: ni precios de trabajos ni facturación
   const sinCostos = ocultaCostos(rol)
   const facturasConSaldo: FacturaExterna[] = (facturas ?? []).map((f: any) => {
@@ -119,7 +152,7 @@ export async function loader({ request }: Route.LoaderArgs) {
     clinicaNombre: MARCA_LAB,
     clinicaRnc: (perfilClinica?.rnc as string | null) ?? null,
     clientes: (clientes ?? []) as ClienteExterno[],
-    trabajos: ((trabajos ?? []) as unknown as TrabajoExterno[]).map(t =>
+    trabajos: (trabajosConFotos as unknown as TrabajoExterno[]).map(t =>
       sinCostos ? { ...t, precio: null } : t
     ),
     facturas: sinCostos ? [] : facturasConSaldo,
@@ -215,23 +248,30 @@ export async function action({ request }: Route.ActionArgs) {
     const bytes = await archivo.arrayBuffer()
     const { error: uploadError } = await supabase.storage.from(FOTOS_BUCKET).upload(path, bytes, { contentType: archivo.type })
     if (uploadError) return { ok: false, error: `Error al subir la foto: ${uploadError.message}`, intent }
-    const { data: { publicUrl } } = supabase.storage.from(FOTOS_BUCKET).getPublicUrl(path)
+    // se guarda la RUTA, no una URL pública: el bucket es privado y el enlace
+    // se firma al mostrarlo
     const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
-    const fotos = [...((trabajo?.fotos as string[] | null) ?? []), publicUrl]
+    const fotos = [...((trabajo?.fotos as string[] | null) ?? []), path]
     const { error: updateError } = await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
     if (updateError) return { ok: false, error: `Foto subida pero no se pudo guardar: ${updateError.message}`, intent }
     return { ok: true, intent }
   }
   if (intent === 'delete_foto_trabajo') {
     const trabajoId = fd.get('trabajo_id') as string
-    const url = fd.get('url') as string
-    const path = photoStoragePath(url)
-    if (path) {
-      const { error: removeError } = await supabase.storage.from(FOTOS_BUCKET).remove([path])
-      if (removeError) return { ok: false, error: removeError.message, intent }
+    const path = photoStoragePath((fd.get('path') as string) ?? '')
+    if (!path) return { ok: false, error: 'Foto inválida.', intent }
+    // la ruta tiene que ser de esta clínica: no se borra con lo que diga el
+    // formulario sin comprobarlo
+    if (!path.startsWith(`${clinicaId}/`)) {
+      return { ok: false, error: 'Esa foto no pertenece a tu clínica.', intent }
     }
+
+    const { error: removeError } = await supabase.storage.from(FOTOS_BUCKET).remove([path])
+    if (removeError) return { ok: false, error: removeError.message, intent }
+
     const { data: trabajo } = await supabase.from('trabajos_externos').select('fotos').eq('id', trabajoId).single()
-    const fotos = ((trabajo?.fotos as string[] | null) ?? []).filter(f => f !== url)
+    // se compara normalizado, porque las filas viejas pueden guardar la URL
+    const fotos = ((trabajo?.fotos as string[] | null) ?? []).filter(f => photoStoragePath(f) !== path)
     const { error: updateError } = await supabase.from('trabajos_externos').update({ fotos }).eq('id', trabajoId).eq('clinica_id', clinicaId)
     if (updateError) return { ok: false, error: updateError.message, intent }
     return { ok: true, intent }
@@ -705,15 +745,15 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
             )}
             {trabajo.fotos.length > 0 && (
               <div className="grid grid-cols-4 gap-2">
-                {trabajo.fotos.map(url => (
-                  <div key={url} className="relative group">
-                    <a href={url} target="_blank" rel="noreferrer">
-                      <img src={url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                {trabajo.fotos.map(foto => (
+                  <div key={foto.path} className="relative group">
+                    <a href={foto.url} target="_blank" rel="noreferrer">
+                      <img src={foto.url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
                     </a>
                     <fotoFetcher.Form method="post" className="absolute -top-1.5 -right-1.5">
                       <input type="hidden" name="intent" value="delete_foto_trabajo" />
                       <input type="hidden" name="trabajo_id" value={trabajo.id} />
-                      <input type="hidden" name="url" value={url} />
+                      <input type="hidden" name="path" value={foto.path} />
                       <button type="submit" className="w-5 h-5 flex items-center justify-center bg-white rounded-full border border-gray-200 text-gray-500 hover:text-red-600 shadow-sm">
                         <X size={11} />
                       </button>
@@ -836,9 +876,9 @@ function TrabajoDetalleModal({ trabajo, clienteTelefono, whatsappHabilitado, cli
               <p className="text-sm text-gray-400">Sin fotos adjuntas.</p>
             ) : (
               <div className="grid grid-cols-4 gap-2">
-                {trabajo.fotos.map(url => (
-                  <a key={url} href={url} target="_blank" rel="noreferrer">
-                    <img src={url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
+                {trabajo.fotos.map(foto => (
+                  <a key={foto.path} href={foto.url} target="_blank" rel="noreferrer">
+                    <img src={foto.url} alt="Foto del trabajo" className="w-full h-16 object-cover rounded-lg border border-gray-200 hover:opacity-90 transition-opacity" />
                   </a>
                 ))}
               </div>
