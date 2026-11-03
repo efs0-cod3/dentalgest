@@ -26,12 +26,13 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'session') {
     const access_token = fd.get('access_token') as string
     const refresh_token = fd.get('refresh_token') as string
+    const flow = fd.get('flow') === 'recovery' ? 'recovery' : 'invite'
     if (!access_token || !refresh_token) {
       return { ok: false, error: 'Enlace inválido o incompleto', intent }
     }
     const { error } = await supabase.auth.setSession({ access_token, refresh_token })
     if (error) return { ok: false, error: error.message, intent }
-    return data({ ok: true, intent }, { headers })
+    return data({ ok: true, intent, flow }, { headers })
   }
 
   if (intent === 'set_password') {
@@ -47,7 +48,8 @@ export async function action({ request }: Route.ActionArgs) {
     }
     const { error } = await supabase.auth.updateUser({ password })
     if (error) return { ok: false, error: error.message, intent }
-    throw redirect('/dashboard', { headers })
+    const flow = fd.get('flow') === 'recovery' ? 'recovery' : 'invite'
+    throw redirect(flow === 'recovery' ? '/login?password_updated=1' : '/dashboard', { headers })
   }
 
   return { ok: false, error: 'Intent desconocido', intent }
@@ -60,6 +62,7 @@ export default function AuthConfirmar() {
   const f = useFetcher()
   const [hashError, setHashError] = useState<string | null>(null)
   const [ready, setReady] = useState(hasSession)
+  const [recovery, setRecovery] = useState(false)
 
   useEffect(() => {
     if (hasSession) return
@@ -76,6 +79,7 @@ export default function AuthConfirmar() {
       fd.append('intent', 'session')
       fd.append('access_token', access_token)
       fd.append('refresh_token', refresh_token)
+      fd.append('flow', params.get('type') === 'recovery' ? 'recovery' : 'invite')
       f.submit(fd, { method: 'post' })
       // limpia los tokens de la URL
       window.history.replaceState(null, '', window.location.pathname)
@@ -86,7 +90,10 @@ export default function AuthConfirmar() {
   }, [hasSession])
 
   useEffect(() => {
-    if (f.data?.ok && f.data.intent === 'session') setReady(true)
+    if (f.data?.ok && f.data.intent === 'session') {
+      setRecovery(f.data.flow === 'recovery')
+      setReady(true)
+    }
   }, [f.data])
 
   const sessionError = f.data && !f.data.ok && f.data.intent === 'session' ? f.data.error : null
@@ -98,7 +105,7 @@ export default function AuthConfirmar() {
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold text-gray-900">Nin Dental Clinic</h1>
-          <p className="text-sm text-gray-500 mt-1">Activa tu cuenta</p>
+          <p className="text-sm text-gray-500 mt-1">{recovery ? 'Restablece tu contraseña' : 'Activa tu cuenta'}</p>
         </div>
 
         {error ? (
@@ -118,7 +125,7 @@ export default function AuthConfirmar() {
             <input type="hidden" name="intent" value="set_password" />
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="password">
-                Nueva contraseña
+                {recovery ? 'Nueva contraseña' : 'Crea tu contraseña'}
               </label>
               <input id="password" name="password" type="password" required minLength={8}
                 autoComplete="new-password" autoFocus className={inputCls} />
