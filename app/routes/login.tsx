@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Form, redirect, useActionData } from 'react-router'
+import { Form, Link, redirect, useActionData } from 'react-router'
 import type { Route } from './+types/login'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 
@@ -83,10 +83,17 @@ export default function Login() {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors"
+            className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors cursor-pointer"
           >
             Ingresar
           </button>
+
+          <Link
+            to="/recuperar"
+            className="block text-center text-sm text-gray-500 hover:text-gray-700"
+          >
+            ¿Olvidaste tu contraseña?
+          </Link>
         </Form>
       </div>
     </div>
