@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, useActionData, redirect } from 'react-router'
+import { Form, Link, useLoaderData, useNavigation, useSubmit, useFetcher, useActionData, useRevalidator, redirect } from 'react-router'
 import type { Route } from './+types/pacientes.$id'
 import type { action as citasAction } from './citas'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
@@ -8,7 +8,7 @@ import { buildPacienteData } from '~/lib/pacientes.server'
 import { getHorarioAgenda } from '~/lib/agenda.server'
 import {
   ChevronLeft, Pencil, Trash2, Plus, Phone, Mail, FileText, Upload,
-  AlertCircle, Heart, Clock, Calendar, Save, CheckCircle,
+  AlertCircle, Heart, Clock, Calendar, Save, CheckCircle, Printer, Ban,
 } from 'lucide-react'
 import { cn, drLocalToUTC, calcularEdad } from '~/lib/utils'
 import { useCloseOnSubmit } from '~/lib/hooks'
@@ -17,6 +17,10 @@ import { PacienteEditModal } from '~/components/PacienteEditModal'
 import { Cie10Selector } from '~/components/Cie10Selector'
 import { etiquetaDiagnostico, titularEntrada, type DiagnosticoGuardado } from '~/lib/cie10'
 import { revisarDiagnosticosDelFormulario, guardarDiagnosticos } from '~/lib/cie10.server'
+import { RecetaFormModal } from '~/components/RecetaFormModal'
+import { contextoReceta, revisarPuedeEmitir } from '~/lib/prescripciones.server'
+import { folioReceta } from '~/lib/prescripciones'
+import { puedeAnularReceta } from '~/lib/permisos'
 import { Odontograma } from '~/components/Odontograma'
 import type { OdontogramaData } from '~/components/Odontograma'
 
@@ -30,6 +34,12 @@ type ExpedienteEntrada = {
   id: string; fecha: string; tipo: string; titulo: string; descripcion: string | null
   entrada_clinica_diagnosticos: DiagnosticoGuardado[]
   doctores: { nombre: string } | null
+}
+type Receta = {
+  id: string; numero: number; fecha: string; estado: string
+  motivo_anulacion: string | null; doctor_id: string
+  doctores: { nombre: string } | null
+  prescripcion_items: { id: string }[]
 }
 type Documento = {
   id: string; nombre: string; tipo: string; url: string; storage_path: string; created_at: string
@@ -76,10 +86,10 @@ export function meta({ data }: Route.MetaArgs) {
 
 export async function loader({ request, params }: Route.LoaderArgs) {
   const { supabase } = createSupabaseServerClient(request)
-  const { clinicaId } = await requireSeccion(request, 'pacientes')
+  const { clinicaId, rol, doctorId } = await requireSeccion(request, 'pacientes')
   const pacienteId = params.id as string
 
-  const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }, horario] = await Promise.all([
+  const [{ data }, { data: doctores }, { data: tratamientos }, { data: odontogramas }, horario, { data: recetas }] = await Promise.all([
     supabase.from('pacientes').select(`
       id, nombre, telefono, email, created_at,
       fecha_nacimiento, cedula, genero, direccion,
@@ -94,6 +104,10 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     supabase.from('odontogramas').select('id, datos, notas, created_at')
       .eq('paciente_id', pacienteId).eq('clinica_id', clinicaId).order('created_at', { ascending: false }),
     getHorarioAgenda(supabase, clinicaId),
+    supabase.from('prescripciones')
+      .select('id, numero, fecha, estado, motivo_anulacion, doctor_id, created_at, doctores(nombre), prescripcion_items(id)')
+      .eq('paciente_id', pacienteId).eq('clinica_id', clinicaId)
+      .order('numero', { ascending: false }),
   ])
 
   if (!data) throw redirect('/dashboard/pacientes')
@@ -122,10 +136,18 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     documentos,
   }
 
+  // ¿puede emitir recetas? (rol clínico + cuenta ligada a un doctor + exequátur)
+  const { doctor } = await contextoReceta(supabase as any, clinicaId, doctorId)
+  const motivoNoReceta = revisarPuedeEmitir(rol, doctor)
+
   return {
     paciente, doctores: (doctores ?? []) as Doctor[], tratamientos: (tratamientos ?? []) as Tratamiento[],
     odontogramas: (odontogramas ?? []) as OdontogramaVersion[],
     horario,
+    recetas: (recetas ?? []) as unknown as Receta[],
+    motivoNoReceta,
+    rol,
+    miDoctorId: doctorId ?? null,
   }
 }
 
@@ -441,6 +463,147 @@ function TabOdontograma({ odontogramas }: { odontogramas: OdontogramaVersion[] }
   )
 }
 
+// ─── recetas tab ──────────────────────────────────────────────────────────────
+
+function TabRecetas({ paciente, recetas, motivoNoReceta, rol, miDoctorId }: {
+  paciente: Paciente
+  recetas: Receta[]
+  motivoNoReceta: string | null
+  rol: string
+  miDoctorId: string | null
+}) {
+  const [nueva, setNueva] = useState(false)
+  const [anular, setAnular] = useState<Receta | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const anulacion = useFetcher<{ ok: boolean; error?: string }>()
+  const revalidator = useRevalidator()
+
+  useEffect(() => {
+    if (anulacion.state === 'idle' && anulacion.data?.ok) {
+      setAnular(null)
+      setMotivo('')
+      revalidator.revalidate()
+    }
+  }, [anulacion.state, anulacion.data])
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Recetas</p>
+        <button onClick={() => setNueva(true)} disabled={!!motivoNoReceta}
+          title={motivoNoReceta ?? 'Emitir una receta'}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40 cursor-pointer disabled:cursor-default transition-colors">
+          <Plus size={13} /> Nueva receta
+        </button>
+      </div>
+
+      {motivoNoReceta && (
+        <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+          {motivoNoReceta}
+        </p>
+      )}
+
+      {recetas.length === 0 ? (
+        <p className="text-sm text-gray-400 text-center py-8">Sin recetas emitidas.</p>
+      ) : (
+        <div className="space-y-2">
+          {recetas.map(r => {
+            const anulada = r.estado === 'anulada'
+            return (
+              <div key={r.id} className={cn(
+                'flex items-start gap-3 p-3 rounded-xl border',
+                anulada ? 'border-red-100 bg-red-50/40' : 'border-gray-100',
+              )}>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-medium text-gray-900">Receta {folioReceta(r.numero)}</p>
+                    {anulada && (
+                      <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-red-100 text-red-700">
+                        Anulada
+                      </span>
+                    )}
+                    <span className="text-xs text-gray-400">
+                      {r.prescripcion_items.length} {r.prescripcion_items.length === 1 ? 'medicamento' : 'medicamentos'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-0.5">
+                    {fmtDate(r.fecha)}{r.doctores ? ` · ${r.doctores.nombre}` : ''}
+                  </p>
+                  {anulada && r.motivo_anulacion && (
+                    <p className="text-xs text-red-600 mt-1">{r.motivo_anulacion}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <a href={`/recetas/${r.id}/imprimir`} target="_blank" rel="noreferrer"
+                    title="Ver e imprimir"
+                    className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+                    <Printer size={14} />
+                  </a>
+                  {!anulada && puedeAnularReceta(rol, miDoctorId, r.doctor_id) && (
+                    <button onClick={() => setAnular(r)} title="Anular"
+                      className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer transition-colors">
+                      <Ban size={14} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {nueva && (
+        <RecetaFormModal
+          pacienteId={paciente.id}
+          pacienteNombre={paciente.nombre}
+          onClose={() => setNueva(false)}
+        />
+      )}
+
+      {anular && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 p-0 sm:p-4">
+          <div className="w-full sm:max-w-md bg-white rounded-t-2xl sm:rounded-2xl shadow-xl p-6 space-y-4">
+            <div>
+              <h2 className="font-semibold text-gray-900">Anular receta {folioReceta(anular.numero)}</h2>
+              <p className="text-xs text-gray-500 mt-1">
+                La receta no se borra: queda registrada como anulada y, si se reimprime, sale marcada.
+                Esto no se puede deshacer.
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Motivo <span className="text-red-500">*</span>
+              </label>
+              <textarea rows={2} value={motivo} onChange={e => setMotivo(e.target.value)}
+                placeholder="Ej. dosis equivocada, se emite otra receta"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+            </div>
+            {anulacion.data?.ok === false && anulacion.data.error && (
+              <p className="text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                {anulacion.data.error}
+              </p>
+            )}
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => { setAnular(null); setMotivo('') }}
+                className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer transition-colors">
+                Cancelar
+              </button>
+              <button type="button" disabled={anulacion.state !== 'idle' || motivo.trim().length < 3}
+                onClick={() => anulacion.submit(
+                  { intent: 'anular', id: anular.id, motivo },
+                  { method: 'post', action: '/api/recetas' },
+                )}
+                className="px-4 py-2 text-sm font-medium bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
+                {anulacion.state !== 'idle' ? 'Anulando…' : 'Anular receta'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── expediente tab ───────────────────────────────────────────────────────────
 
 function TabClinico({ paciente, doctores }: { paciente: Paciente; doctores: Doctor[] }) {
@@ -692,10 +855,11 @@ function TabDocumentos({ paciente }: { paciente: Paciente }) {
 // ─── page ─────────────────────────────────────────────────────────────────────
 
 export default function PacienteDetalle() {
-  const { paciente, doctores, tratamientos, odontogramas, horario } = useLoaderData<typeof loader>()
+  const { paciente, doctores, tratamientos, odontogramas, horario, recetas, motivoNoReceta, rol, miDoctorId } =
+    useLoaderData<typeof loader>()
   const navigation = useNavigation()
   const submit = useSubmit()
-  const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'documentos' | 'odontograma'>('datos')
+  const [tab, setTab] = useState<'datos' | 'clinico' | 'citas' | 'recetas' | 'documentos' | 'odontograma'>('datos')
   const [editModal, setEditModal] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const isDeleting = navigation.state === 'submitting'
@@ -705,6 +869,7 @@ export default function PacienteDetalle() {
     { id: 'datos', label: 'Datos' },
     { id: 'clinico', label: `Clínico${paciente.expediente_entradas.length ? ` (${paciente.expediente_entradas.length})` : ''}` },
     { id: 'citas', label: `Citas${paciente.citas.length ? ` (${paciente.citas.length})` : ''}` },
+    { id: 'recetas', label: `Recetas${recetas.length ? ` (${recetas.length})` : ''}` },
     { id: 'documentos', label: `Documentos${paciente.documentos.length ? ` (${paciente.documentos.length})` : ''}` },
     { id: 'odontograma', label: `Odontograma${odontogramas.length ? ` (${odontogramas.length})` : ''}` },
   ] as const
@@ -874,6 +1039,16 @@ export default function PacienteDetalle() {
                 ))
               }
             </div>
+          )}
+
+          {tab === 'recetas' && (
+            <TabRecetas
+              paciente={paciente}
+              recetas={recetas}
+              motivoNoReceta={motivoNoReceta}
+              rol={rol}
+              miDoctorId={miDoctorId}
+            />
           )}
 
           {tab === 'documentos' && <TabDocumentos paciente={paciente} />}

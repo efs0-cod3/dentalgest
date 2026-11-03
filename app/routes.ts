@@ -12,6 +12,9 @@ export default [
   route('api/export-consultas', 'routes/api.export-consultas.ts'),
   route('api/onboarding-visto', 'routes/api.onboarding-visto.ts'),
   route('api/cie10', 'routes/api.cie10.ts'),
+  route('api/recetas', 'routes/api.recetas.ts'),
+  // fuera del layout del dashboard: la hoja impresa no lleva menú
+  route('recetas/:id/imprimir', 'routes/recetas.$id.imprimir.tsx'),
   route('verificar/:id', 'routes/verificar.$id.tsx'),
   route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
   route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),
