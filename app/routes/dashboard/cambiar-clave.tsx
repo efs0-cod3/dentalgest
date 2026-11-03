@@ -1,12 +1,14 @@
-import { Form, Link, redirect, useActionData, useNavigation } from 'react-router'
+import { Form, Link, data, redirect, useActionData, useNavigation } from 'react-router'
 import type { Route } from './+types/cambiar-clave'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
+import { KeyRound } from 'lucide-react'
 
 // Cambiar la propia contraseña estando dentro.
 //
-// Es una página aparte y no una pestaña de Configuración a propósito: a esa
-// solo entran propietario y admin, y recepción, doctores y laboratorio también
-// tienen que poder cambiar la suya. Se llega desde el menú lateral.
+// Va dentro del layout del dashboard para que no parezca que te expulsó la
+// aplicación, pero NO es una pestaña de Configuración: a esa solo entran
+// propietario y admin, y recepción, doctores y laboratorio también tienen que
+// poder cambiar la suya. Se llega desde el menú lateral.
 //
 // Pide la contraseña actual antes de cambiarla: si no, cualquiera que agarre
 // una sesión abierta —un teléfono desbloqueado, la computadora de la clínica—
@@ -19,45 +21,42 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { supabase } = createSupabaseServerClient(request)
+  const { supabase, headers } = createSupabaseServerClient(request)
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return redirect('/login')
-  // tras el cambio se vuelve aquí con ?ok=1 para poder entregar las cookies
-  // de la sesión nueva en la redirección
-  const exito = new URL(request.url).searchParams.get('ok') === '1'
-  return { email: user.email ?? '', exito }
+  if (!user) throw redirect('/login', { headers })
+  return data({ email: user.email ?? '' }, { headers })
 }
 
 export async function action({ request }: Route.ActionArgs) {
   const { supabase, headers } = createSupabaseServerClient(request)
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user?.email) return redirect('/login')
+  if (!user?.email) throw redirect('/login', { headers })
+
+  // Todas las salidas van con `headers`: getUser() y signInWithPassword
+  // escriben cookies de sesión, y si no se entregan, el navegador se queda con
+  // las anteriores y la sesión se rompe —incluso al equivocarse de clave—.
+  const fallo = (error: string) => data({ ok: false as const, error }, { headers })
 
   const fd = await request.formData()
   const actual = (fd.get('actual') as string) ?? ''
   const nueva = (fd.get('nueva') as string) ?? ''
   const confirmar = (fd.get('confirmar') as string) ?? ''
 
-  if (!actual) return { ok: false as const, error: 'Escribe tu contraseña actual.' }
-  if (nueva.length < MIN_LARGO) {
-    return { ok: false as const, error: `La contraseña nueva debe tener al menos ${MIN_LARGO} caracteres.` }
-  }
-  if (nueva !== confirmar) return { ok: false as const, error: 'La contraseña nueva y su confirmación no coinciden.' }
-  if (nueva === actual) return { ok: false as const, error: 'La contraseña nueva tiene que ser distinta de la actual.' }
+  if (!actual) return fallo('Escribe tu contraseña actual.')
+  if (nueva.length < MIN_LARGO) return fallo(`La contraseña nueva debe tener al menos ${MIN_LARGO} caracteres.`)
+  if (nueva !== confirmar) return fallo('La contraseña nueva y su confirmación no coinciden.')
+  if (nueva === actual) return fallo('La contraseña nueva tiene que ser distinta de la actual.')
 
-  // Comprobar la actual antes de cambiar nada.
   const { error: malActual } = await supabase.auth.signInWithPassword({
     email: user.email,
     password: actual,
   })
-  if (malActual) return { ok: false as const, error: 'La contraseña actual no es correcta.' }
+  if (malActual) return fallo('La contraseña actual no es correcta.')
 
   const { error } = await supabase.auth.updateUser({ password: nueva })
-  if (error) return { ok: false as const, error: error.message }
+  if (error) return fallo(error.message)
 
-  // Con headers: comprobar la contraseña actual emitió una sesión nueva, y si
-  // no se entregan sus cookies el navegador se queda con las anteriores.
-  throw redirect('/cambiar-clave?ok=1', { headers })
+  return data({ ok: true as const }, { headers })
 }
 
 const inputCls =
@@ -69,25 +68,26 @@ export default function CambiarClave({ loaderData }: Route.ComponentProps) {
   const guardando = navigation.state === 'submitting'
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-        <div className="mb-6">
-          <h1 className="text-xl font-bold text-gray-900">Cambiar contraseña</h1>
-          <p className="text-sm text-gray-500 mt-1 break-words">{loaderData.email}</p>
-        </div>
+    <div className="p-4 md:p-8 max-w-md">
+      <div className="flex items-center gap-2 mb-1">
+        <KeyRound size={18} className="text-gray-400" />
+        <h1 className="text-2xl font-bold text-gray-900">Cambiar contraseña</h1>
+      </div>
+      <p className="text-sm text-gray-400 mb-6 break-words">{loaderData.email}</p>
 
-        {loaderData.exito ? (
+      <div className="bg-white rounded-2xl border border-gray-200 p-6">
+        {actionData?.ok ? (
           <div className="space-y-4">
             <div className="text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-3">
               <p className="font-medium">Contraseña cambiada</p>
               <p className="mt-1 text-green-700">
-                A partir de ahora entra con la nueva. Si habías entrado en otro dispositivo, esa
-                sesión sigue abierta.
+                A partir de ahora entra con la nueva. Si tenías la sesión abierta en otro
+                dispositivo, puede seguir abierta; ciérrala desde ahí si hace falta.
               </p>
             </div>
             <Link to="/dashboard"
-              className="block w-full text-center bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
-              Volver a la aplicación
+              className="block w-full text-center bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 cursor-pointer transition-colors">
+              Volver al inicio
             </Link>
           </div>
         ) : (
@@ -125,10 +125,6 @@ export default function CambiarClave({ loaderData }: Route.ComponentProps) {
               className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 cursor-pointer disabled:cursor-default transition-colors">
               {guardando ? 'Guardando…' : 'Cambiar contraseña'}
             </button>
-
-            <Link to="/dashboard" className="block text-center text-sm text-gray-500 hover:text-gray-700">
-              Cancelar
-            </Link>
           </Form>
         )}
       </div>

@@ -4,7 +4,6 @@ export default [
   index('routes/home.tsx'),
   route('login', 'routes/login.tsx'),
   route('recuperar', 'routes/recuperar.tsx'),
-  route('cambiar-clave', 'routes/cambiar-clave.tsx'),
   route('auth/confirmar', 'routes/auth.confirmar.tsx'),
   route('logout', 'routes/logout.tsx'),
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
@@ -29,5 +28,8 @@ export default [
     route('dashboard/laboratorio', 'routes/dashboard/laboratorio.tsx'),
     route('dashboard/trabajos-externos', 'routes/dashboard/trabajos-externos.tsx'),
     route('dashboard/configuracion', 'routes/dashboard/configuracion.tsx'),
+    // dentro del layout: cualquier rol la alcanza desde el menú, sin pasar
+    // por Configuración, que es solo de propietario y admin
+    route('dashboard/cambiar-clave', 'routes/dashboard/cambiar-clave.tsx'),
   ]),
 ] satisfies RouteConfig

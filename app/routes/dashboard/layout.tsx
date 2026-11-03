@@ -141,13 +141,18 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         )}
         {/* cualquiera puede cambiar la suya, sin pasar por Configuración */}
         <NavLink
-          to="/cambiar-clave"
+          to="/dashboard/cambiar-clave"
           onClick={onNav}
           title={collapsedNav ? 'Cambiar contraseña' : undefined}
-          className={cn(
-            'flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors',
-            collapsedNav && 'justify-center px-0'
-          )}
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm transition-colors',
+              collapsedNav && 'justify-center px-0',
+              isActive
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            )
+          }
         >
           <KeyRound size={16} />
           {!collapsedNav && 'Cambiar contraseña'}
