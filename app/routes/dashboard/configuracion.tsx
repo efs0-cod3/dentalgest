@@ -12,12 +12,13 @@ import { TemaSelector } from '~/components/TemaSelector'
 import {
   Building2, Users, Stethoscope, Syringe, Calendar, Bell,
   DollarSign, AlertTriangle, Plus, Pencil, Trash2, X, Check,
-  Download, LogOut, MessageCircle, Palette,
+  Download, LogOut, MessageCircle, Palette, KeyRound,
 } from 'lucide-react'
+import { CambiarClaveForm } from '~/components/CambiarClaveForm'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
-type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'apariencia' | 'peligro'
+type TabId = 'clinica' | 'usuarios' | 'doctores' | 'tratamientos' | 'agenda' | 'notificaciones' | 'caja' | 'mi-cuenta' | 'apariencia' | 'peligro'
 
 type ClinicaData = {
   id: string; nombre: string; rnc: string | null
@@ -422,6 +423,20 @@ function ClinicaSection({ clinica }: { clinica: ClinicaData | null }) {
           <FeedbackMsg data={f.data} />
         </div>
       </f.Form>
+    </SectionCard>
+  )
+}
+
+// ─── section: Mi cuenta ───────────────────────────────────────────────────────
+
+// Disponible para todos los roles, también en la vista reducida de arriba: la
+// contraseña la cambia cada quien, no la gestiona un admin.
+function MiCuentaSection() {
+  return (
+    <SectionCard title="Cambiar contraseña" description="Hace falta la actual para poder cambiarla">
+      <div className="max-w-sm">
+        <CambiarClaveForm />
+      </div>
     </SectionCard>
   )
 }
@@ -1219,6 +1234,7 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'agenda', label: 'Agenda', icon: Calendar },
   { id: 'notificaciones', label: 'Notificaciones', icon: Bell },
   { id: 'caja', label: 'Caja', icon: DollarSign },
+  { id: 'mi-cuenta', label: 'Mi cuenta', icon: KeyRound },
   { id: 'apariencia', label: 'Apariencia', icon: Palette },
   { id: 'peligro', label: 'Zona de peligro', icon: AlertTriangle },
 ]
@@ -1228,13 +1244,21 @@ const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
 export default function Configuracion({ loaderData }: Route.ComponentProps) {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  // quien no gestiona la clínica solo dispone de Apariencia
+  // Quien no gestiona la clínica dispone de Apariencia y de su propia cuenta:
+  // la contraseña la cambia todo el mundo, no solo propietario y admin.
   if (loaderData.soloApariencia) {
     return (
-      <div className="p-4 md:p-8 max-w-2xl">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">Apariencia</h1>
-        <p className="text-sm text-gray-400 mb-6">Cómo se ve la aplicación en este dispositivo</p>
-        <AparienciaSection />
+      <div className="p-4 md:p-8 max-w-2xl space-y-8">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Mi cuenta</h1>
+          <p className="text-sm text-gray-400 mb-6">Tu contraseña de acceso</p>
+          <MiCuentaSection />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 mb-1">Apariencia</h1>
+          <p className="text-sm text-gray-400 mb-6">Cómo se ve la aplicación en este dispositivo</p>
+          <AparienciaSection />
+        </div>
       </div>
     )
   }
@@ -1295,6 +1319,7 @@ export default function Configuracion({ loaderData }: Route.ComponentProps) {
           {tab === 'agenda' && <AgendaSection config={config} clinicaNombre={clinica?.nombre ?? 'la clínica'} />}
           {tab === 'notificaciones' && <NotificacionesSection config={config} resendEstado={resendEstado} />}
           {tab === 'caja' && <CajaSection config={config} />}
+          {tab === 'mi-cuenta' && <MiCuentaSection />}
           {tab === 'apariencia' && <AparienciaSection />}
           {tab === 'peligro' && <PeligroSection />}
         </div>
