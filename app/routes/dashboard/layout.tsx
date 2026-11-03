@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { redirect, Outlet, NavLink, Form, useRevalidator } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Palette, Menu, X, Stethoscope, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Palette, Menu, X, Stethoscope, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
 import { NotificationBell, type Reserva } from '~/components/NotificationBell'
@@ -139,6 +139,24 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         {!collapsedNav && (
           <p className="text-xs text-gray-500 px-3 mb-2 truncate">{loaderData.user.email}</p>
         )}
+        {/* cualquiera puede cambiar la suya, sin pasar por Configuración */}
+        <NavLink
+          to="/dashboard/cambiar-clave"
+          onClick={onNav}
+          title={collapsedNav ? 'Cambiar contraseña' : undefined}
+          className={({ isActive }) =>
+            cn(
+              'flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm transition-colors',
+              collapsedNav && 'justify-center px-0',
+              isActive
+                ? 'bg-blue-50 text-blue-700'
+                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+            )
+          }
+        >
+          <KeyRound size={16} />
+          {!collapsedNav && 'Cambiar contraseña'}
+        </NavLink>
         <Form method="post" action="/logout">
           <button
             type="submit"
