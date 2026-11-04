@@ -20,6 +20,7 @@ export default [
   route('verificar/:id', 'routes/verificar.$id.tsx'),
   route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
   route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),
+  route('verificar-receta/:id', 'routes/verificar-receta.$id.tsx'),
   route('reservar/:token', 'routes/reservar.$token.tsx'),
   route('unirse/:token', 'routes/unirse.$token.tsx'),
   layout('routes/dashboard/layout.tsx', [
