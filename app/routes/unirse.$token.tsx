@@ -49,15 +49,16 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (password.length < 8) return { ok: false, error: 'La contraseña debe tener al menos 8 caracteres.' }
   if (password !== confirm) return { ok: false, error: 'Las contraseñas no coinciden.' }
 
-  // Reclama el enlace atómicamente: solo una petición puede pasar de no usado
-  // a reservado. Así dos registros simultáneos no crean dos cuentas con el
-  // mismo enlace.
+  // Reclama el enlace con una reserva temporal. Si el proceso del servidor se
+  // interrumpe, otra persona podrá reintentarlo cuando la reserva expire.
   const reclamadaEn = new Date().toISOString()
+  const reservaVencida = new Date(Date.now() - 15 * 60 * 1000).toISOString()
   const { data: reclamo, error: reclamoErr } = await admin.from('invitaciones')
-    .update({ usada_at: reclamadaEn })
+    .update({ reclamo_at: reclamadaEn })
     .eq('id', inv.id)
     .is('usada_at', null)
     .gt('expira_at', reclamadaEn)
+    .or(`reclamo_at.is.null,reclamo_at.lt.${reservaVencida}`)
     .select('id')
     .maybeSingle()
 
@@ -68,9 +69,9 @@ export async function action({ params, request }: Route.ActionArgs) {
   // Si falla el alta, libera el enlace para que pueda intentarse de nuevo.
   const liberarInvitacion = async () => {
     await admin.from('invitaciones')
-      .update({ usada_at: null, usada_por: null })
+      .update({ reclamo_at: null })
       .eq('id', inv.id)
-      .eq('usada_at', reclamadaEn)
+      .eq('reclamo_at', reclamadaEn)
   }
 
   // crea la cuenta ya confirmada: no se envía ningún correo, así que no
@@ -104,9 +105,10 @@ export async function action({ params, request }: Route.ActionArgs) {
 
   // Confirma el uso del enlace vinculándolo a la cuenta recién creada.
   const { data: confirmada, error: confirmarErr } = await admin.from('invitaciones')
-    .update({ usada_por: creado.user.id })
+    .update({ usada_at: new Date().toISOString(), usada_por: creado.user.id, reclamo_at: null })
     .eq('id', inv.id)
-    .eq('usada_at', reclamadaEn)
+    .eq('reclamo_at', reclamadaEn)
+    .is('usada_at', null)
     .select('id')
     .maybeSingle()
 
