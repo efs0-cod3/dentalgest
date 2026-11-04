@@ -677,7 +677,6 @@ function MiCuentaSection() {
 
 // ─── section: Usuarios ────────────────────────────────────────────────────────
 
-const ROLES = ['propietario', 'admin', 'recepcionista', 'doctor', 'laboratorio'] as const
 
 function UsuariosSection({ perfiles, doctores, invitaciones, clinicaNombre }: { perfiles: Perfil[]; doctores: Doctor[]; invitaciones: Invitacion[]; clinicaNombre: string }) {
   const f = useFetcher()
