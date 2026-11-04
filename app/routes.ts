@@ -7,6 +7,7 @@ export default [
   route('auth/confirmar', 'routes/auth.confirmar.tsx'),
   route('logout', 'routes/logout.tsx'),
   route('api/send-recibo', 'routes/api.send-recibo.ts'),
+  route('api/send-cotizacion', 'routes/api.send-cotizacion.ts'),
   route('api/export-datos', 'routes/api.export-datos.ts'),
   route('api/export-todo-csv', 'routes/api.export-todo-csv.ts'),
   route('api/export-aging-externo', 'routes/api.export-aging-externo.ts'),
