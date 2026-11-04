@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { data, Form, redirect, useActionData, useLoaderData } from 'react-router'
+import { data, Form, Link, redirect, useActionData, useLoaderData } from 'react-router'
 import type { Route } from './+types/login'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 
@@ -18,41 +18,15 @@ export async function loader({ request }: Route.LoaderArgs) {
   )
 }
 
+// Pedir el enlace de recuperación vive en /recuperar, en su propia página.
 export async function action({ request }: Route.ActionArgs) {
   const { supabase, headers } = createSupabaseServerClient(request)
   const formData = await request.formData()
-  const intent = String(formData.get('intent') ?? 'login')
   const email = String(formData.get('email') ?? '').trim()
-
-  if (intent === 'reset') {
-    const fallo = (mensaje: string) =>
-      data({ intent: 'reset' as const, error: mensaje as string | null, resetSent: false }, { headers })
-
-    if (!email) return fallo('Escribe tu correo electrónico.')
-
-    // El redirectTo se arma con el host de ESTA petición a propósito. El
-    // verificador PKCE viaja en una cookie, y una cookie puesta en
-    // www.dentigest.com no se manda a dentigest.com: fijar aquí un host
-    // distinto del que está usando la persona rompería el canje del código.
-    const redirectTo = new URL('/auth/confirmar', request.url).toString()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
-    if (error) return fallo(error.message)
-
-    // CON headers, y esto es lo que estaba roto: en el flujo PKCE
-    // resetPasswordForEmail genera un verificador y lo guarda en una cookie.
-    // Al devolver un objeto pelado, esas cabeceras se descartaban y el
-    // verificador nunca llegaba al navegador, así que el enlace del correo
-    // jamás se podía canjear por una sesión.
-    // Mensaje deliberadamente neutro para no revelar si el correo está registrado.
-    return data(
-      { intent: 'reset' as const, error: null as string | null, resetSent: true },
-      { headers },
-    )
-  }
-
   const password = String(formData.get('password') ?? '')
+
   const { error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) return data({ intent: 'login' as const, error: error.message }, { headers })
+  if (error) return data({ error: error.message }, { headers })
 
   return redirect('/dashboard', { headers })
 }
@@ -77,8 +51,6 @@ export default function Login() {
     }
   }, [])
 
-  const resetSent = actionData?.intent === 'reset' && actionData.resetSent
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
@@ -94,7 +66,6 @@ export default function Login() {
         )}
 
         <Form method="post" className="space-y-4">
-          <input type="hidden" name="intent" value="login" />
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="email">
               Correo electrónico
@@ -112,40 +83,21 @@ export default function Login() {
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 
-          {actionData?.intent === 'login' && actionData.error && (
+          {actionData?.error && (
             <p className="text-sm text-red-600">{actionData.error}</p>
           )}
 
           <button type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition-colors">
+            className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-blue-700 cursor-pointer transition-colors">
             Ingresar
           </button>
+
+          <Link to="/recuperar"
+            className="block text-center text-sm text-gray-500 hover:text-gray-700">
+            ¿Olvidaste tu contraseña?
+          </Link>
         </Form>
 
-        <div className="mt-5 border-t border-gray-200 pt-4">
-          <p className="text-sm font-medium text-gray-700 mb-2">¿Olvidaste tu contraseña?</p>
-          <Form method="post" className="space-y-3">
-            <input type="hidden" name="intent" value="reset" />
-            <label className="block text-xs text-gray-500" htmlFor="reset-email">
-              Escribe tu correo y te enviaremos un enlace para crear una contraseña nueva.
-            </label>
-            <input id="reset-email" name="email" type="email" required autoComplete="email"
-              placeholder="correo@ejemplo.com"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
-            {actionData?.intent === 'reset' && actionData.error && (
-              <p className="text-sm text-red-600">{actionData.error}</p>
-            )}
-            {resetSent && (
-              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
-                Si el correo corresponde a una cuenta, recibirás instrucciones para restablecer la contraseña.
-              </p>
-            )}
-            <button type="submit"
-              className="w-full border border-blue-600 text-blue-700 py-2 rounded-lg text-sm font-medium hover:bg-blue-50 transition-colors">
-              Enviar enlace de recuperación
-            </button>
-          </Form>
-        </div>
       </div>
     </div>
   )
