@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import QRCode from 'qrcode'
 import type { Route } from './+types/recetas.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getSesion } from '~/lib/clinica.server'
@@ -30,6 +31,7 @@ type ItemImpreso = {
 
 type RecetaImpresa = {
   id: string
+  verification_token: string
   numero: number
   fecha: string
   estado: string
@@ -66,14 +68,14 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const { data } = await supabase
     .from('prescripciones')
     .select(`
-      id, numero, fecha, estado, motivo_anulacion, indicaciones_generales, snapshot,
+      id, verification_token, numero, fecha, estado, motivo_anulacion, indicaciones_generales, snapshot,
       prescripcion_items(orden, medicamento, presentacion, dosis, via, frecuencia, duracion, cantidad, indicaciones)
     `)
     .eq('id', params.id as string)
     .eq('clinica_id', clinicaId)
     .maybeSingle()
 
-  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, papel, autoImprimir, conMembrete }
+  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, qrDataUrl: null, papel, autoImprimir, conMembrete }
 
   const receta = data as unknown as RecetaImpresa
   receta.prescripcion_items = [...(receta.prescripcion_items ?? [])].sort((a, b) => a.orden - b.orden)
@@ -85,7 +87,15 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     firmarImagen(supabase as any, receta.snapshot?.clinica?.logo_path),
   ])
 
-  return { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir, conMembrete }
+  const verificationUrl = new URL(`/verificar-receta/${receta.id}?token=${receta.verification_token}`, request.url).toString()
+  const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 240,
+    color: { dark: '#111827', light: '#ffffff' },
+  })
+
+  return { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete }
 }
 
 function fmtFecha(iso: string) {
@@ -97,7 +107,7 @@ function fmtFecha(iso: string) {
 const CLAVE_DESPLAZAMIENTO = 'recetaDesplazamientoIn'
 
 export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
-  const { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir, conMembrete } = loaderData
+  const { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete } = loaderData
 
   // Cuánto bajar el contenido para que caiga debajo del membrete ya impreso
   // del talonario. Es cosa de cada impresora y de cada talonario, así que se
@@ -202,6 +212,12 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         .firma-linea p { margin: 0; font-size: .64rem; line-height: 1.3; }
         .firma-especialidad { color: #4b5563; font-style: italic; }
         .sello-img { max-height: 1.1in; max-width: 1.1in; object-fit: contain; opacity: .9; }
+        .verificacion-qr {
+          display: flex; justify-content: flex-end; align-items: center; gap: .35rem;
+          margin-top: .55rem; font-family: system-ui, -apple-system, sans-serif;
+          color: #6b7280; font-size: .48rem; line-height: 1.2; text-align: right;
+        }
+        .verificacion-qr img { width: .62in; height: .62in; object-fit: contain; }
         .controladas { margin-top: 1.1rem; font-size: .55rem; color: #6b7280; border-top: 1px dotted #d1d5db; padding-top: .25rem; }
         .anulada-marca {
           position: absolute; top: 42%; left: 50%;
@@ -355,6 +371,13 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
             </div>
             {selloUrl && <img className="sello-img" src={selloUrl} alt="" />}
           </div>
+
+          {qrDataUrl && (
+            <div className="verificacion-qr">
+              <span>Verifica la autenticidad<br />de esta receta</span>
+              <img src={qrDataUrl} alt="Código QR para verificar la receta" />
+            </div>
+          )}
 
           <p className="controladas">
             Esta receta no es válida para sustancias controladas, que requieren el recetario oficial correspondiente.
