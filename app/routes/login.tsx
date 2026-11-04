@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Form, redirect, useActionData } from 'react-router'
+import { data, Form, redirect, useActionData, useLoaderData } from 'react-router'
 import type { Route } from './+types/login'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 
@@ -8,10 +8,14 @@ export function meta(): Route.MetaDescriptors {
 }
 
 export async function loader({ request }: Route.LoaderArgs) {
-  const { supabase } = createSupabaseServerClient(request)
+  const { supabase, headers } = createSupabaseServerClient(request)
   const { data: { user } } = await supabase.auth.getUser()
-  if (user) return redirect('/dashboard')
-  return {}
+  if (user) throw redirect('/dashboard', { headers })
+  const url = new URL(request.url)
+  return data(
+    { claveActualizada: url.searchParams.get('password_updated') === '1' },
+    { headers },
+  )
 }
 
 export async function action({ request }: Route.ActionArgs) {
@@ -21,30 +25,55 @@ export async function action({ request }: Route.ActionArgs) {
   const email = String(formData.get('email') ?? '').trim()
 
   if (intent === 'reset') {
-    if (!email) return { intent: 'reset', error: 'Escribe tu correo electrónico.' }
+    const fallo = (mensaje: string) =>
+      data({ intent: 'reset' as const, error: mensaje as string | null, resetSent: false }, { headers })
+
+    if (!email) return fallo('Escribe tu correo electrónico.')
+
+    // El redirectTo se arma con el host de ESTA petición a propósito. El
+    // verificador PKCE viaja en una cookie, y una cookie puesta en
+    // www.dentigest.com no se manda a dentigest.com: fijar aquí un host
+    // distinto del que está usando la persona rompería el canje del código.
     const redirectTo = new URL('/auth/confirmar', request.url).toString()
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo,
-    })
-    if (error) return { intent: 'reset', error: error.message }
+    const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo })
+    if (error) return fallo(error.message)
+
+    // CON headers, y esto es lo que estaba roto: en el flujo PKCE
+    // resetPasswordForEmail genera un verificador y lo guarda en una cookie.
+    // Al devolver un objeto pelado, esas cabeceras se descartaban y el
+    // verificador nunca llegaba al navegador, así que el enlace del correo
+    // jamás se podía canjear por una sesión.
     // Mensaje deliberadamente neutro para no revelar si el correo está registrado.
-    return { intent: 'reset', resetSent: true }
+    return data(
+      { intent: 'reset' as const, error: null as string | null, resetSent: true },
+      { headers },
+    )
   }
 
   const password = String(formData.get('password') ?? '')
   const { error } = await supabase.auth.signInWithPassword({ email, password })
-  if (error) return { intent: 'login', error: error.message }
+  if (error) return data({ intent: 'login' as const, error: error.message }, { headers })
 
   return redirect('/dashboard', { headers })
 }
 
 export default function Login() {
   const actionData = useActionData<typeof action>()
+  const { claveActualizada } = useLoaderData<typeof loader>()
 
+  // Red de seguridad: si un enlace de Supabase aterriza aquí en vez de en
+  // /auth/confirmar, se reenvía con todo lo que traiga. El flujo PKCE manda el
+  // código en la QUERY (?code=…) y el antiguo manda los tokens en el
+  // FRAGMENTO (#access_token=…); hay que contemplar los dos.
   useEffect(() => {
-    const h = window.location.hash
-    if (h.includes('access_token') || h.includes('error_description')) {
-      window.location.replace('/auth/confirmar' + h)
+    const { hash, search } = window.location
+    if (hash.includes('access_token') || hash.includes('error_description')) {
+      window.location.replace('/auth/confirmar' + hash)
+      return
+    }
+    const q = new URLSearchParams(search)
+    if (q.has('code') || q.has('error_description')) {
+      window.location.replace('/auth/confirmar' + search)
     }
   }, [])
 
@@ -57,6 +86,12 @@ export default function Login() {
           <h1 className="text-2xl font-bold text-gray-900">Nin Dental Clinic</h1>
           <p className="text-sm text-gray-500 mt-1">Ingresa a tu cuenta</p>
         </div>
+
+        {claveActualizada && (
+          <p className="mb-4 text-sm text-green-800 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+            Contraseña actualizada. Entra con la nueva.
+          </p>
+        )}
 
         <Form method="post" className="space-y-4">
           <input type="hidden" name="intent" value="login" />
