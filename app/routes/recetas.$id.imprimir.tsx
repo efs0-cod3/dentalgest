@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import type { Route } from './+types/recetas.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getSesion } from '~/lib/clinica.server'
@@ -59,6 +60,8 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const url = new URL(request.url)
   const papel: TamanoPapel = normalizarTamanoPapel(url.searchParams.get('papel'))
   const autoImprimir = url.searchParams.get('auto') === '1'
+  // ?membrete=0 → para imprimir encima del talonario ya impreso de la clínica
+  const conMembrete = url.searchParams.get('membrete') !== '0'
 
   const { data } = await supabase
     .from('prescripciones')
@@ -70,7 +73,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .eq('clinica_id', clinicaId)
     .maybeSingle()
 
-  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, papel, autoImprimir }
+  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, papel, autoImprimir, conMembrete }
 
   const receta = data as unknown as RecetaImpresa
   receta.prescripcion_items = [...(receta.prescripcion_items ?? [])].sort((a, b) => a.orden - b.orden)
@@ -82,7 +85,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     firmarImagen(supabase as any, receta.snapshot?.clinica?.logo_path),
   ])
 
-  return { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir }
+  return { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir, conMembrete }
 }
 
 function fmtFecha(iso: string) {
@@ -91,8 +94,28 @@ function fmtFecha(iso: string) {
   return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('es-DO', { dateStyle: 'long' })
 }
 
+const CLAVE_DESPLAZAMIENTO = 'recetaDesplazamientoIn'
+
 export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
-  const { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir } = loaderData
+  const { receta, firmaUrl, selloUrl, logoUrl, papel, autoImprimir, conMembrete } = loaderData
+
+  // Cuánto bajar el contenido para que caiga debajo del membrete ya impreso
+  // del talonario. Es cosa de cada impresora y de cada talonario, así que se
+  // ajusta aquí y se recuerda; no tiene sentido fijarlo en el código.
+  const [desplazamiento, setDesplazamiento] = useState(1.9)
+  useEffect(() => {
+    // se lee después de montar para no romper la hidratación
+    try {
+      const guardado = localStorage.getItem(CLAVE_DESPLAZAMIENTO)
+      if (guardado !== null && Number.isFinite(Number(guardado))) setDesplazamiento(Number(guardado))
+    } catch { /* navegador sin almacenamiento: se queda el valor por defecto */ }
+  }, [])
+
+  function cambiarDesplazamiento(valor: number) {
+    const limitado = Math.min(6, Math.max(0, Number(valor.toFixed(2))))
+    setDesplazamiento(limitado)
+    try { localStorage.setItem(CLAVE_DESPLAZAMIENTO, String(limitado)) } catch { /* ídem */ }
+  }
 
   if (!receta) {
     return (
@@ -138,6 +161,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
           margin: 1.2rem auto; padding: .45in; background: #ffffff;
           box-shadow: 0 1px 3px rgba(0,0,0,.18);
         }
+        .hoja.sin-membrete { padding-top: calc(.45in + var(--desplazamiento, 0in)); }
         .marca-agua {
           /* al 44% y no al 50%: centrada en la hoja entera cae sobre la firma
              y el rótulo asoma por debajo del pie, porque una receta corta deja
@@ -191,10 +215,34 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
           margin-top: .5rem; font-size: .62rem; color: #9f1239;
           border: 1px solid #fecdd3; background: #fff1f2; padding: .3rem .45rem; border-radius: .25rem;
         }
+        /* ─── modo sin membrete ───────────────────────────────────────────────
+           Para imprimir ENCIMA del talonario ya impreso de la clínica. Se
+           calla todo lo que el papel ya trae —logo, nombre, dirección, RNC,
+           la marca de agua, el Rx y la nota del pie—, y queda solo lo que
+           cambia en cada receta.
+
+           La raya de la firma y la firma escaneada también se van: el
+           talonario trae su propia línea y se firma a mano sobre el papel.
+           El nombre y el exequátur sí se imprimen, que son obligatorios. */
+        .sin-membrete .cabecera,
+        .sin-membrete .marca-agua,
+        .sin-membrete .rx,
+        .sin-membrete .controladas,
+        .sin-membrete .firma-img { display: none; }
+        .sin-membrete .firma-linea { border-top: none; }
+        .aviso-membrete {
+          margin: 0 auto 1rem; max-width: 34rem; text-align: center;
+          font-family: system-ui, -apple-system, sans-serif;
+          font-size: .72rem; color: #92400e;
+          background: #fffbeb; border: 1px solid #fde68a;
+          border-radius: .5rem; padding: .5rem .75rem;
+        }
         @media print {
           body { background: #ffffff; }
           .no-print { display: none !important; }
           .hoja { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
+          /* el desplazamiento para cuadrar con el talonario sí se imprime */
+          .hoja.sin-membrete { padding-top: var(--desplazamiento, 0); }
         }
       `}</style>
 
@@ -202,13 +250,40 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         <div className="barra no-print">
           <button type="button" className="primario" onClick={() => window.print()}>Imprimir</button>
           {TAMANOS_PAPEL.map(t => (
-            <a key={t} href={`?papel=${t}`} className={t === papel ? 'actual' : undefined}>
+            <a key={t} href={`?papel=${t}${conMembrete ? '' : '&membrete=0'}`}
+              className={t === papel ? 'actual' : undefined}>
               {MEDIDAS[t].etiqueta}
             </a>
           ))}
+          <a href={`?papel=${papel}${conMembrete ? '&membrete=0' : ''}`}
+            className={conMembrete ? undefined : 'actual'}>
+            {conMembrete ? 'Sin membrete' : 'Con membrete'}
+          </a>
+          {!conMembrete && (
+            <label style={{ fontSize: '.72rem', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
+              Bajar
+              <input
+                type="number" step="0.1" min="0" max="6" value={desplazamiento}
+                onChange={e => cambiarDesplazamiento(Number(e.target.value))}
+                style={{ width: '4.2rem', padding: '.35rem .4rem', border: '1px solid #d1d5db', borderRadius: '.4rem', fontSize: '.75rem' }}
+              />
+              pulgadas
+            </label>
+          )}
         </div>
 
-        <div className="hoja">
+        {!conMembrete && (
+          <p className="aviso-membrete no-print">
+            Modo sin membrete: sale solo lo que cambia en cada receta, para imprimir sobre
+            el talonario. Haz una prueba en una hoja en blanco y ponla a contraluz sobre el
+            talonario para cuadrar el «bajar».
+          </p>
+        )}
+
+        <div
+          className={conMembrete ? 'hoja' : 'hoja sin-membrete'}
+          style={{ ['--desplazamiento' as string]: `${desplazamiento}in` }}
+        >
           {/* el logo de la clínica, al fondo y muy tenue, como el talonario */}
           <img className="marca-agua" src={logoHoja} alt="" aria-hidden="true" />
 
