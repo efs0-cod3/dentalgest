@@ -271,6 +271,11 @@ export async function action({ request }: Route.ActionArgs) {
     if (!(ROLES as readonly string[]).includes(nuevoRol)) {
       return { ok: false, error: 'El rol seleccionado no es válido.', intent }
     }
+    const { data: perfilGestor } = await supabase.from('perfiles')
+      .select('rol').eq('id', gestor.id).eq('clinica_id', clinicaId).single()
+    if (nuevoRol === 'propietario' && perfilGestor?.rol !== 'propietario') {
+      return { ok: false, error: 'Solo el propietario actual puede asignar ese rol.', intent }
+    }
     const admin = createSupabaseAdminClient()
     const { error } = await admin.from('perfiles')
       .update({ rol: nuevoRol })
@@ -285,6 +290,11 @@ export async function action({ request }: Route.ActionArgs) {
     const rolInvitado = ((fd.get('rol') as string) || 'recepcionista')
     if (!(ROLES as readonly string[]).includes(rolInvitado)) {
       return { ok: false, error: 'El rol seleccionado no es válido.', intent }
+    }
+    const { data: perfilGestor } = await supabase.from('perfiles')
+      .select('rol').eq('id', gestor.id).eq('clinica_id', clinicaId).single()
+    if (rolInvitado === 'propietario' && perfilGestor?.rol !== 'propietario') {
+      return { ok: false, error: 'Solo el propietario actual puede invitar a otro propietario.', intent }
     }
     const admin = createSupabaseAdminClient()
     const { data: inv, error } = await admin.from('invitaciones')
