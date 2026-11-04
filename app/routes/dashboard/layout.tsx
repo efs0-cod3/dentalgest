@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { redirect, Outlet, NavLink, Form, useRevalidator } from 'react-router'
 import type { Route } from './+types/layout'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
-import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Palette, Menu, X, Stethoscope, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react'
+import { Calendar, DollarSign, Users, LayoutDashboard, LogOut, FileText, FlaskConical, Building2, Settings, Menu, X, Stethoscope, ChevronLeft, ChevronRight, KeyRound } from 'lucide-react'
 import { cn } from '~/lib/utils'
 import { puedeVer, type Seccion } from '~/lib/permisos'
 import { NotificationBell, type Reserva } from '~/components/NotificationBell'
@@ -60,7 +60,9 @@ const nav: { to: string; label: string; icon: any; end: boolean; seccion: Seccio
   { to: '/dashboard/trabajos-externos', label: 'Trabajos externos', icon: Building2, end: false, seccion: 'trabajos-externos' },
   { to: '/dashboard/configuracion', label: 'Configuración', icon: Settings, end: false, seccion: 'configuracion' },
   // para quien no gestiona la clínica, la misma ruta muestra solo el tema
-  { to: '/dashboard/configuracion?tab=apariencia', label: 'Apariencia', icon: Palette, end: false, seccion: 'apariencia' },
+  // Para quien no gestiona la clínica, esta es su puerta a Configuración:
+  // ahí tiene su contraseña, sus datos de doctor y el tema.
+  { to: '/dashboard/configuracion', label: 'Mi cuenta', icon: KeyRound, end: false, seccion: 'apariencia' },
 ]
 
 export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
@@ -139,24 +141,8 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         {!collapsedNav && (
           <p className="text-xs text-gray-500 px-3 mb-2 truncate">{loaderData.user.email}</p>
         )}
-        {/* cualquiera puede cambiar la suya, sin pasar por Configuración */}
-        <NavLink
-          to="/dashboard/cambiar-clave"
-          onClick={onNav}
-          title={collapsedNav ? 'Cambiar contraseña' : undefined}
-          className={({ isActive }) =>
-            cn(
-              'flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm transition-colors',
-              collapsedNav && 'justify-center px-0',
-              isActive
-                ? 'bg-blue-50 text-blue-700'
-                : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
-            )
-          }
-        >
-          <KeyRound size={16} />
-          {!collapsedNav && 'Cambiar contraseña'}
-        </NavLink>
+        {/* Cambiar la contraseña vive en Configuración → Mi cuenta, no aquí:
+            el menú lateral es para las secciones de trabajo. */}
         <Form method="post" action="/logout">
           <button
             type="submit"

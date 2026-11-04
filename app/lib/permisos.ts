@@ -51,7 +51,9 @@ export const SECCION_INFO: Record<Seccion, { label: string; desc: string }> = {
   laboratorio: { label: 'Laboratorio', desc: 'Órdenes enviadas al laboratorio y su estado de entrega.' },
   'trabajos-externos': { label: 'Trabajos externos', desc: 'Trabajos recibidos de otras clínicas o doctores.' },
   configuracion: { label: 'Configuración', desc: 'Datos de la clínica, equipo, doctores, tratamientos y agenda.' },
-  apariencia: { label: 'Apariencia', desc: 'Elige el tema claro u oscuro para este dispositivo.' },
+  // Para los roles sin acceso a Configuración completa, esta entrada les abre
+  // su propia página: contraseña, datos de doctor y tema.
+  apariencia: { label: 'Mi cuenta', desc: 'Tu contraseña, tus datos y el tema claro u oscuro.' },
 }
 
 // nota extra según el rol, para dejar claro el alcance de su acceso
@@ -85,7 +87,7 @@ export const RUTA_SECCION: Record<Seccion, string> = {
   laboratorio: '/dashboard/laboratorio',
   'trabajos-externos': '/dashboard/trabajos-externos',
   configuracion: '/dashboard/configuracion',
-  apariencia: '/dashboard/configuracion?tab=apariencia',
+  apariencia: '/dashboard/configuracion',
 }
 
 // El rol doctor solo ve lo suyo (sus citas, sus consultas, sus pacientes).
