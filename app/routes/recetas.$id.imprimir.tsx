@@ -65,7 +65,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   // ?membrete=0 → para imprimir encima del talonario ya impreso de la clínica
   const conMembrete = url.searchParams.get('membrete') !== '0'
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('prescripciones')
     .select(`
       id, verification_token, numero, fecha, estado, motivo_anulacion, indicaciones_generales, snapshot,
@@ -75,17 +75,33 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     .eq('clinica_id', clinicaId)
     .maybeSingle()
 
-  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, qrDataUrl: null, papel, autoImprimir, conMembrete }
+  // Un error de la consulta NO es lo mismo que "no existe", y confundirlos
+  // sale caro: cuando se añadió verification_token al select sin aplicar la
+  // migración, PostgREST devolvía "column does not exist" y la página decía
+  // "Receta no encontrada" para TODAS las recetas, sin dejar rastro en ningún
+  // log. Si vuelve a pasar, ahora se ve en los registros del servidor.
+  if (error) console.error('[receta/imprimir] la consulta falló:', error.message)
+
+  if (!data) return { receta: null, firmaUrl: null, selloUrl: null, logoUrl: null, qrDataUrl: null, clinicaNombre: null, papel, autoImprimir, conMembrete }
 
   const receta = data as unknown as RecetaImpresa
   receta.prescripcion_items = [...(receta.prescripcion_items ?? [])].sort((a, b) => a.orden - b.orden)
 
   // las imágenes son privadas: se firman aquí, en el servidor, y por poco tiempo
-  const [firmaUrl, selloUrl, logoUrl] = await Promise.all([
+  const [firmaUrl, selloUrl, logoUrl, { data: clinica }] = await Promise.all([
     firmarImagen(supabase as any, receta.snapshot?.doctor?.firma_path),
     firmarImagen(supabase as any, receta.snapshot?.clinica?.sello_path),
     firmarImagen(supabase as any, receta.snapshot?.clinica?.logo_path),
+    // El NOMBRE de la clínica es la excepción al snapshot: se lee el actual.
+    // Lo demás —doctor, exequátur, paciente, medicamentos— sigue congelado,
+    // que es lo que hace que una reimpresión valga como copia de lo que se le
+    // entregó al paciente. El nombre es rótulo: la clínica es la misma aunque
+    // le cambien el letrero, y lo que no puede pasar es que una receta vieja
+    // salga con un nombre que ya no existe.
+    supabase.from('clinicas').select('nombre').eq('id', clinicaId).maybeSingle(),
   ])
+
+  const clinicaNombre = (clinica?.nombre as string | null) ?? null
 
   const verificationUrl = new URL(`/verificar-receta/${receta.id}?token=${receta.verification_token}`, request.url).toString()
   const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
@@ -95,7 +111,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
     color: { dark: '#111827', light: '#ffffff' },
   })
 
-  return { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete }
+  return { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, clinicaNombre, papel, autoImprimir, conMembrete }
 }
 
 function fmtFecha(iso: string) {
@@ -107,7 +123,7 @@ function fmtFecha(iso: string) {
 const CLAVE_DESPLAZAMIENTO = 'recetaDesplazamientoIn'
 
 export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
-  const { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete } = loaderData
+  const { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, clinicaNombre, papel, autoImprimir, conMembrete } = loaderData
 
   // Cuánto bajar el contenido para que caiga debajo del membrete ya impreso
   // del talonario. Es cosa de cada impresora y de cada talonario, así que se
@@ -308,7 +324,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
           <div className="cabecera">
             <img src={logoHoja} alt="" />
             <div>
-              <p className="clinica-nombre">{s.clinica.nombre}</p>
+              <p className="clinica-nombre">{clinicaNombre ?? s.clinica.nombre}</p>
               <p className="clinica-datos">
                 {s.clinica.direccion && <>{s.clinica.direccion}<br /></>}
                 {[s.clinica.telefono, s.clinica.email].filter(Boolean).join(' · ')}
