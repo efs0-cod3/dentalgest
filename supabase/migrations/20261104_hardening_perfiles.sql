@@ -8,3 +8,8 @@ revoke update on table public.perfiles from anon, authenticated;
 grant update (nombre, onboarding_visto_at)
   on table public.perfiles
   to authenticated;
+
+-- Reserva temporal para impedir registros concurrentes sin dejar el enlace
+-- bloqueado permanentemente si el proceso del servidor se interrumpe.
+alter table public.invitaciones
+  add column if not exists reclamo_at timestamptz;
