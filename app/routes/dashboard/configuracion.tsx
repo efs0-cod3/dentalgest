@@ -715,7 +715,7 @@ function UsuariosSection({ perfiles, doctores, invitaciones, clinicaNombre }: { 
 
                 {/* el rol doctor solo ve "lo suyo": hay que decir a qué ficha
                     de doctor corresponde esta cuenta */}
-                {p.rol === 'doctor' && (
+                {(p.rol === 'doctor' || p.rol === 'propietario') && (
                   <div className="mt-1 flex items-center gap-1.5">
                     <span className="text-xs text-gray-400">Ficha:</span>
                     <select
