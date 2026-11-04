@@ -2,7 +2,7 @@ import type { Route } from './+types/recetas.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getSesion } from '~/lib/clinica.server'
 import { firmarImagen } from '~/lib/prescripciones.server'
-import { folioReceta, normalizarTamanoPapel, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
+import { folioReceta, normalizarTamanoPapel, TAMANOS_PAPEL, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
 
 // Vista de impresión de una receta.
 //
@@ -40,8 +40,9 @@ type RecetaImpresa = {
 
 // `size` va al @page; `ancho`/`alto` solo dibujan la vista previa en pantalla.
 const MEDIDAS: Record<TamanoPapel, { size: string; ancho: string; alto: string; etiqueta: string }> = {
-  a5: { size: 'A5', ancho: '148mm', alto: '210mm', etiqueta: 'A5 (media carta)' },
-  carta: { size: '8.5in 11in', ancho: '8.5in', alto: '11in', etiqueta: 'Carta' },
+  'media-carta': { size: '5.5in 8.5in', ancho: '5.5in', alto: '8.5in', etiqueta: 'Media carta · 5.5 × 8.5 in' },
+  a5: { size: 'A5', ancho: '148mm', alto: '210mm', etiqueta: 'A5 · 148 × 210 mm' },
+  carta: { size: '8.5in 11in', ancho: '8.5in', alto: '11in', etiqueta: 'Carta · 8.5 × 11 in' },
 }
 
 export function meta({ data }: Route.MetaArgs): Route.MetaDescriptors {
@@ -106,7 +107,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
 
   const { snapshot: s } = receta
   const anulada = receta.estado === 'anulada'
-  const otroPapel: TamanoPapel = papel === 'a5' ? 'carta' : 'a5'
+  const logoHoja = logoUrl ?? '/ninlogo.png'
 
   return (
     <>
@@ -126,11 +127,27 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
           cursor: pointer; text-decoration: none;
         }
         .barra button.primario { background: #1e40af; border-color: #1e40af; color: #ffffff; }
+        .barra a.actual { background: #eff6ff; border-color: #1e40af; color: #1e40af; }
         .hoja {
-          position: relative; width: ${MEDIDAS[papel].ancho};
+          /* z-index: 0 crea el contexto de apilado, que es lo que deja a la
+             marca de agua meterse DEBAJO del texto y por encima del blanco.
+             Sin él, un z-index negativo la escondería tras el fondo de la hoja. */
+          position: relative; z-index: 0;
+          width: ${MEDIDAS[papel].ancho};
           min-height: ${MEDIDAS[papel].alto};
           margin: 1.2rem auto; padding: .45in; background: #ffffff;
           box-shadow: 0 1px 3px rgba(0,0,0,.18);
+        }
+        .marca-agua {
+          /* al 44% y no al 50%: centrada en la hoja entera cae sobre la firma
+             y el rótulo asoma por debajo del pie, porque una receta corta deja
+             vacía la mitad de abajo. Así queda en el cuerpo, como el talonario. */
+          position: absolute; top: 44%; left: 50%;
+          transform: translate(-50%, -50%);
+          width: 56%; max-width: 3in; z-index: -1;
+          opacity: .07; pointer-events: none; user-select: none;
+          /* sin esto, los navegadores se comen la marca al imprimir */
+          -webkit-print-color-adjust: exact; print-color-adjust: exact;
         }
         .cabecera { display: flex; gap: .6rem; align-items: flex-start; border-bottom: 1.5px solid #111827; padding-bottom: .4rem; }
         .cabecera img { max-height: 54px; max-width: 110px; object-fit: contain; }
@@ -165,7 +182,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         .anulada-marca {
           position: absolute; top: 42%; left: 50%;
           transform: translate(-50%, -50%) rotate(-22deg);
-          font-size: ${papel === 'a5' ? '3.4rem' : '5rem'}; font-weight: 700;
+          font-size: ${papel === 'carta' ? '5rem' : '3.4rem'}; font-weight: 700;
           color: rgba(190, 18, 60, .28); letter-spacing: .1em;
           border: .22rem solid rgba(190, 18, 60, .28); padding: .1em .22em;
           pointer-events: none; white-space: nowrap;
@@ -184,15 +201,21 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
       <div className="receta-raiz">
         <div className="barra no-print">
           <button type="button" className="primario" onClick={() => window.print()}>Imprimir</button>
-          <a href={`?papel=${otroPapel}`}>Cambiar a {MEDIDAS[otroPapel].etiqueta.toLowerCase()}</a>
-          <span style={{ fontSize: '.7rem', color: '#6b7280' }}>{MEDIDAS[papel].etiqueta}</span>
+          {TAMANOS_PAPEL.map(t => (
+            <a key={t} href={`?papel=${t}`} className={t === papel ? 'actual' : undefined}>
+              {MEDIDAS[t].etiqueta}
+            </a>
+          ))}
         </div>
 
         <div className="hoja">
+          {/* el logo de la clínica, al fondo y muy tenue, como el talonario */}
+          <img className="marca-agua" src={logoHoja} alt="" aria-hidden="true" />
+
           {anulada && <div className="anulada-marca">ANULADA</div>}
 
           <div className="cabecera">
-            {logoUrl ? <img src={logoUrl} alt="" /> : <img src="/ninlogo.png" alt="" />}
+            <img src={logoHoja} alt="" />
             <div>
               <p className="clinica-nombre">{s.clinica.nombre}</p>
               <p className="clinica-datos">
