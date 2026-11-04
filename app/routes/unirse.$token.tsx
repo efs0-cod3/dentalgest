@@ -49,6 +49,30 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (password.length < 8) return { ok: false, error: 'La contraseña debe tener al menos 8 caracteres.' }
   if (password !== confirm) return { ok: false, error: 'Las contraseñas no coinciden.' }
 
+  // Reclama el enlace atómicamente: solo una petición puede pasar de no usado
+  // a reservado. Así dos registros simultáneos no crean dos cuentas con el
+  // mismo enlace.
+  const reclamadaEn = new Date().toISOString()
+  const { data: reclamo, error: reclamoErr } = await admin.from('invitaciones')
+    .update({ usada_at: reclamadaEn })
+    .eq('id', inv.id)
+    .is('usada_at', null)
+    .gt('expira_at', reclamadaEn)
+    .select('id')
+    .maybeSingle()
+
+  if (reclamoErr || !reclamo) {
+    return { ok: false, error: 'Este enlace ya fue utilizado o venció. Pide uno nuevo a la clínica.' }
+  }
+
+  // Si falla el alta, libera el enlace para que pueda intentarse de nuevo.
+  const liberarInvitacion = async () => {
+    await admin.from('invitaciones')
+      .update({ usada_at: null, usada_por: null })
+      .eq('id', inv.id)
+      .eq('usada_at', reclamadaEn)
+  }
+
   // crea la cuenta ya confirmada: no se envía ningún correo, así que no
   // dependemos del proveedor de email ni de sus límites
   const { data: creado, error: crearErr } = await admin.auth.admin.createUser({
@@ -58,6 +82,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     user_metadata: { clinica_id: inv.clinica_id },
   })
   if (crearErr || !creado?.user) {
+    await liberarInvitacion()
     const yaExiste = crearErr?.status === 422 || /already/i.test(crearErr?.message ?? '')
     return {
       ok: false,
@@ -71,12 +96,26 @@ export async function action({ params, request }: Route.ActionArgs) {
     { id: creado.user.id, clinica_id: inv.clinica_id, rol: inv.rol, email, nombre },
     { onConflict: 'id' },
   )
-  if (perfilErr) return { ok: false, error: perfilErr.message }
+  if (perfilErr) {
+    await admin.auth.admin.deleteUser(creado.user.id)
+    await liberarInvitacion()
+    return { ok: false, error: 'No se pudo completar el perfil. El enlace quedó disponible para volver a intentarlo.' }
+  }
 
-  // marca el enlace como usado (de un solo uso)
-  await admin.from('invitaciones')
-    .update({ usada_at: new Date().toISOString(), usada_por: creado.user.id })
+  // Confirma el uso del enlace vinculándolo a la cuenta recién creada.
+  const { data: confirmada, error: confirmarErr } = await admin.from('invitaciones')
+    .update({ usada_por: creado.user.id })
     .eq('id', inv.id)
+    .eq('usada_at', reclamadaEn)
+    .select('id')
+    .maybeSingle()
+
+  if (confirmarErr || !confirmada) {
+    await admin.from('perfiles').delete().eq('id', creado.user.id)
+    await admin.auth.admin.deleteUser(creado.user.id)
+    await liberarInvitacion()
+    return { ok: false, error: 'No se pudo confirmar el enlace. Intenta nuevamente o solicita uno nuevo a la clínica.' }
+  }
 
   // inicia sesión y entra al dashboard (ahí verá la bienvenida de su rol)
   const { supabase, headers } = createSupabaseServerClient(request)
@@ -84,7 +123,6 @@ export async function action({ params, request }: Route.ActionArgs) {
   if (loginErr) return { ok: false, error: 'Cuenta creada. Ya puedes iniciar sesión con tu correo y contraseña.' }
   throw redirect('/dashboard', { headers })
 }
-
 const inputCls = 'w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500'
 
 export default function Unirse() {
