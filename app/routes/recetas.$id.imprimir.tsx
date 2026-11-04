@@ -2,7 +2,7 @@ import type { Route } from './+types/recetas.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getSesion } from '~/lib/clinica.server'
 import { firmarImagen } from '~/lib/prescripciones.server'
-import { folioReceta, esTamanoPapel, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
+import { folioReceta, normalizarTamanoPapel, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
 
 // Vista de impresión de una receta.
 //
@@ -38,9 +38,10 @@ type RecetaImpresa = {
   prescripcion_items: ItemImpreso[]
 }
 
-const MEDIDAS: Record<TamanoPapel, { size: string; etiqueta: string }> = {
-  'media-carta': { size: '5.5in 8.5in', etiqueta: 'Media carta' },
-  carta: { size: '8.5in 11in', etiqueta: 'Carta' },
+// `size` va al @page; `ancho`/`alto` solo dibujan la vista previa en pantalla.
+const MEDIDAS: Record<TamanoPapel, { size: string; ancho: string; alto: string; etiqueta: string }> = {
+  a5: { size: 'A5', ancho: '148mm', alto: '210mm', etiqueta: 'A5 (media carta)' },
+  carta: { size: '8.5in 11in', ancho: '8.5in', alto: '11in', etiqueta: 'Carta' },
 }
 
 export function meta({ data }: Route.MetaArgs): Route.MetaDescriptors {
@@ -55,8 +56,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   const { clinicaId } = await getSesion(request)
 
   const url = new URL(request.url)
-  const papelParam = url.searchParams.get('papel')
-  const papel: TamanoPapel = esTamanoPapel(papelParam) ? papelParam : 'media-carta'
+  const papel: TamanoPapel = normalizarTamanoPapel(url.searchParams.get('papel'))
   const autoImprimir = url.searchParams.get('auto') === '1'
 
   const { data } = await supabase
@@ -106,7 +106,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
 
   const { snapshot: s } = receta
   const anulada = receta.estado === 'anulada'
-  const otroPapel: TamanoPapel = papel === 'media-carta' ? 'carta' : 'media-carta'
+  const otroPapel: TamanoPapel = papel === 'a5' ? 'carta' : 'a5'
 
   return (
     <>
@@ -127,8 +127,8 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         }
         .barra button.primario { background: #1e40af; border-color: #1e40af; color: #ffffff; }
         .hoja {
-          position: relative; width: ${papel === 'media-carta' ? '5.5in' : '8.5in'};
-          min-height: ${papel === 'media-carta' ? '8.5in' : '11in'};
+          position: relative; width: ${MEDIDAS[papel].ancho};
+          min-height: ${MEDIDAS[papel].alto};
           margin: 1.2rem auto; padding: .45in; background: #ffffff;
           box-shadow: 0 1px 3px rgba(0,0,0,.18);
         }
@@ -136,10 +136,6 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         .cabecera img { max-height: 54px; max-width: 110px; object-fit: contain; }
         .clinica-nombre { font-size: 1rem; font-weight: 700; line-height: 1.15; margin: 0; }
         .clinica-datos { font-size: .62rem; color: #4b5563; line-height: 1.35; margin: .12rem 0 0; }
-        .doctor { text-align: right; margin-left: auto; }
-        .doctor-nombre { font-size: .8rem; font-weight: 700; margin: 0; }
-        .doctor-datos { font-size: .62rem; color: #4b5563; margin: .1rem 0 0; line-height: 1.35; }
-        .exequatur { font-weight: 700; color: #111827; }
         .paciente {
           display: flex; flex-wrap: wrap; gap: .15rem 1.1rem;
           font-size: .68rem; padding: .45rem 0; border-bottom: 1px solid #d1d5db;
@@ -153,17 +149,23 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         .medicamento-nota { font-size: .66rem; color: #4b5563; font-style: italic; }
         .generales { margin-top: .7rem; font-size: .7rem; line-height: 1.45; }
         .generales-titulo { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin-bottom: .1rem; }
-        .pie { margin-top: 2.2rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
-        .firma-zona { position: relative; flex: 1; max-width: 2.6in; }
-        .firma-img { position: absolute; bottom: .25rem; left: 50%; transform: translateX(-50%); max-height: 56px; max-width: 2.2in; object-fit: contain; }
+        .pie { margin-top: 2.4rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
+        .firma-zona { flex: 1; max-width: 2.6in; }
+        /* La firma va en el flujo normal, encima de la raya, y no posicionada
+           desde abajo: así no depende de cuántas líneas de texto haya debajo
+           —si al doctor se le pone especialidad, la firma no se descoloca—.
+           El margen negativo la deja montada sobre la raya lo justo, que es
+           como se firma en papel. */
+        .firma-img { display: block; margin: 0 auto -.3rem; max-height: 56px; max-width: 2.2in; object-fit: contain; }
         .firma-linea { border-top: 1px solid #111827; padding-top: .2rem; text-align: center; }
         .firma-linea p { margin: 0; font-size: .64rem; line-height: 1.3; }
+        .firma-especialidad { color: #4b5563; font-style: italic; }
         .sello-img { max-height: 1.1in; max-width: 1.1in; object-fit: contain; opacity: .9; }
         .controladas { margin-top: 1.1rem; font-size: .55rem; color: #6b7280; border-top: 1px dotted #d1d5db; padding-top: .25rem; }
         .anulada-marca {
           position: absolute; top: 42%; left: 50%;
           transform: translate(-50%, -50%) rotate(-22deg);
-          font-size: ${papel === 'media-carta' ? '3.4rem' : '5rem'}; font-weight: 700;
+          font-size: ${papel === 'a5' ? '3.4rem' : '5rem'}; font-weight: 700;
           color: rgba(190, 18, 60, .28); letter-spacing: .1em;
           border: .22rem solid rgba(190, 18, 60, .28); padding: .1em .22em;
           pointer-events: none; white-space: nowrap;
@@ -199,13 +201,9 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
                 {s.clinica.rnc && <><br />RNC {s.clinica.rnc}</>}
               </p>
             </div>
-            <div className="doctor">
-              <p className="doctor-nombre">{s.doctor.nombre}</p>
-              <p className="doctor-datos">
-                {s.doctor.especialidad && <>{s.doctor.especialidad}<br /></>}
-                <span className="exequatur">Exequátur: {s.doctor.exequatur || '____________'}</span>
-              </p>
-            </div>
+            {/* El doctor no se repite aquí arriba: nombre, especialidad y
+                exequátur van una sola vez, debajo de la firma, que es donde
+                tienen valor legal. */}
           </div>
 
           <div className="paciente">
@@ -251,6 +249,9 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
               {firmaUrl && <img className="firma-img" src={firmaUrl} alt="" />}
               <div className="firma-linea">
                 <p>{s.doctor.nombre}</p>
+                {s.doctor.especialidad && (
+                  <p className="firma-especialidad">{s.doctor.especialidad}</p>
+                )}
                 <p>Exequátur: {s.doctor.exequatur || '____________'}</p>
               </div>
             </div>

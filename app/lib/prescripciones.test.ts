@@ -12,6 +12,7 @@ import {
   folioReceta,
   lineaMedicamento,
   esTamanoPapel,
+  normalizarTamanoPapel,
 } from './prescripciones'
 import {
   puedeEmitirReceta,
@@ -236,9 +237,23 @@ describe('presentación', () => {
   })
 
   it('reconoce los tamaños de papel', () => {
-    expect(esTamanoPapel('media-carta')).toBe(true)
+    expect(esTamanoPapel('a5')).toBe(true)
     expect(esTamanoPapel('carta')).toBe(true)
     expect(esTamanoPapel('a4')).toBe(false)
     expect(esTamanoPapel(null)).toBe(false)
+    // ya no es un tamaño: es el nombre viejo, y lo traduce normalizar
+    expect(esTamanoPapel('media-carta')).toBe(false)
+  })
+
+  it('normaliza el tamaño con A5 por defecto', () => {
+    expect(normalizarTamanoPapel('a5')).toBe('a5')
+    expect(normalizarTamanoPapel('carta')).toBe('carta')
+    expect(normalizarTamanoPapel(null)).toBe('a5')
+    expect(normalizarTamanoPapel('cualquier-cosa')).toBe('a5')
+  })
+
+  it('un enlace viejo con media-carta sigue abriendo, en A5', () => {
+    // si esto se rompe, una pestaña guardada acaba imprimiendo en carta
+    expect(normalizarTamanoPapel('media-carta')).toBe('a5')
   })
 })
