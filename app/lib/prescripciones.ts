@@ -18,12 +18,31 @@ export const MAX_LARGO_INDICACIONES = 300
 export const MAX_LARGO_INDICACIONES_GENERALES = 1000
 export const MAX_LARGO_MOTIVO_ANULACION = 500
 
-/** Tamaños de papel que la vista de impresión sabe manejar. */
-export const TAMANOS_PAPEL = ['media-carta', 'carta'] as const
+/**
+ * Tamaños de papel que la vista de impresión sabe manejar.
+ *
+ * A5 (148 × 210 mm) es el tamaño del recetario. No es lo mismo que la "media
+ * carta" estadounidense (5.5 × 8.5 in = 139.7 × 215.9 mm): es algo más ancha
+ * y algo más corta. Antes se imprimía en media carta, así que el nombre
+ * aparece en la etiqueta para que se reconozca.
+ */
+export const TAMANOS_PAPEL = ['a5', 'carta'] as const
 export type TamanoPapel = (typeof TAMANOS_PAPEL)[number]
 
 export function esTamanoPapel(v: string | null | undefined): v is TamanoPapel {
   return !!v && (TAMANOS_PAPEL as readonly string[]).includes(v)
+}
+
+/**
+ * Tamaño a usar a partir del parámetro de la URL, con A5 por defecto.
+ *
+ * 'media-carta' era el nombre anterior del tamaño chico. Se sigue aceptando
+ * para que un enlace guardado o una pestaña abierta no acabe imprimiendo en
+ * carta de golpe; se traduce a A5, que es lo que era en intención.
+ */
+export function normalizarTamanoPapel(v: string | null | undefined): TamanoPapel {
+  if (v === 'media-carta') return 'a5'
+  return esTamanoPapel(v) ? v : 'a5'
 }
 
 /** Vías de administración de uso corriente, para el desplegable. */
