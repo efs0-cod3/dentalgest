@@ -3,7 +3,7 @@
 -- Los cambios de rol y de doctor vinculado siguen realizándose en rutas de servidor
 -- con el cliente administrativo, después de validar al gestor y la clínica.
 
-revoke update on table public.perfiles from anon, authenticated;
+revoke update on table public.perfiles from public, anon, authenticated;
 
 grant update (nombre, onboarding_visto_at)
   on table public.perfiles
