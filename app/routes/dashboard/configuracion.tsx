@@ -4,7 +4,7 @@ import type { Route } from './+types/configuracion'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { createSupabaseAdminClient } from '~/lib/supabase.admin.server'
 import { requireSeccion, getSesion } from '~/lib/clinica.server'
-import { puedeVer } from '~/lib/permisos'
+import { puedeVer, ROLES } from '~/lib/permisos'
 import { HORARIO_DEFAULT } from '~/lib/agenda.server'
 import { cn, fmtMoney } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
@@ -267,9 +267,13 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'update_rol') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const nuevoRol = (fd.get('rol') as string) ?? ''
+    if (!(ROLES as readonly string[]).includes(nuevoRol)) {
+      return { ok: false, error: 'El rol seleccionado no es válido.', intent }
+    }
     const admin = createSupabaseAdminClient()
     const { error } = await admin.from('perfiles')
-      .update({ rol: fd.get('rol') as string })
+      .update({ rol: nuevoRol })
       .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
@@ -278,11 +282,15 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'crear_invitacion') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const rolInvitado = ((fd.get('rol') as string) || 'recepcionista')
+    if (!(ROLES as readonly string[]).includes(rolInvitado)) {
+      return { ok: false, error: 'El rol seleccionado no es válido.', intent }
+    }
     const admin = createSupabaseAdminClient()
     const { data: inv, error } = await admin.from('invitaciones')
       .insert({
         clinica_id: clinicaId,
-        rol: (fd.get('rol') as string) || 'recepcionista',
+        rol: rolInvitado,
         creada_por: gestor.id,
       })
       .select('token,rol')
@@ -303,10 +311,24 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'update_doctor_vinculado') {
     const gestor = await requireGestorEquipo()
     if (!gestor) return { ok: false, error: 'Solo propietario o admin pueden gestionar el equipo', intent }
+    const doctorIdNuevo = ((fd.get('doctor_id') as string) || '').trim() || null
+    const usuarioId = ((fd.get('id') as string) || '').trim()
+    if (!usuarioId) return { ok: false, error: 'Selecciona un usuario válido.', intent }
+
     const admin = createSupabaseAdminClient()
+    if (doctorIdNuevo) {
+      const { data: doctor } = await admin.from('doctores')
+        .select('id')
+        .eq('id', doctorIdNuevo)
+        .eq('clinica_id', clinicaId)
+        .maybeSingle()
+      if (!doctor) {
+        return { ok: false, error: 'El doctor seleccionado no pertenece a esta clínica.', intent }
+      }
+    }
     const { error } = await admin.from('perfiles')
-      .update({ doctor_id: (fd.get('doctor_id') as string) || null })
-      .eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
+      .update({ doctor_id: doctorIdNuevo })
+      .eq('id', usuarioId).eq('clinica_id', clinicaId)
     return error ? { ok: false, error: error.message, intent } : { ok: true, intent }
   }
 
