@@ -63,87 +63,6 @@ const estadoConfig: Record<EstadoOrden, { label: string; color: string; Icon: an
 
 // ─── print html ───────────────────────────────────────────────────────────────
 
-function esc(s: string) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-
-function buildOrdenHtml(orden: OrdenLaboratorio): string {
-  const folio = orden.id.slice(-8).toUpperCase();
-  const today = new Date().toLocaleDateString("es-DO", { dateStyle: "long" });
-
-  function row(label: string, value: string | null | undefined, highlight = false) {
-    if (!value) return "";
-    return `<tr>
-      <td style="padding:9px 0;border-bottom:1px solid #f1f5f9;width:40%;vertical-align:top;">
-        <p style="margin:0;font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;">${label}</p>
-      </td>
-      <td style="padding:9px 0 9px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top;">
-        <p style="margin:0;font-size:13px;color:${highlight ? "#1e40af" : "#0f172a"};font-weight:${highlight ? "700" : "500"};">${esc(value)}</p>
-      </td>
-    </tr>`;
-  }
-
-  return `<!DOCTYPE html><html lang="es"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Orden de Laboratorio #${folio} — ${MARCA_LAB}</title>
-<script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;background:#f1f5f9;padding:32px 20px;}
-@media print{body{background:white;padding:0;}.no-print{display:none!important;}@page{margin:1.5cm;size:A5;}}
-</style></head><body>
-<div style="max-width:520px;margin:0 auto;">
-<div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.10);">
-
-  <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:22px 28px;display:flex;justify-content:space-between;align-items:flex-start;">
-    <div>
-      <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;text-transform:uppercase;letter-spacing:.1em;">Orden de Laboratorio</p>
-      <p style="color:white;font-size:18px;font-weight:800;margin:0 0 2px;">${MARCA_LAB}</p>
-      <p style="color:rgba(255,255,255,.8);font-size:12px;margin:0;font-family:monospace;">Folio #${folio}</p>
-    </div>
-    <div style="text-align:right;">
-      <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;">Fecha de impresión</p>
-      <p style="color:white;font-size:12px;font-weight:500;margin:0;">${today}</p>
-    </div>
-  </div>
-
-  <div style="padding:20px 28px;">
-    <p style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px;padding-bottom:12px;border-bottom:2px solid #e2e8f0;">${esc(orden.titulo)}</p>
-    <table style="width:100%;border-collapse:collapse;">
-      ${row("Paciente", orden.pacientes?.nombre)}
-      ${row("Doctor", orden.doctor)}
-      ${row("Laboratorio", orden.laboratorio, true)}
-      ${row("Tipo de trabajo", orden.tipo_trabajo)}
-      ${row("Color dental", orden.color_dental, true)}
-      ${row("Fecha de envío", orden.fecha_solicitud ? fmtDate(orden.fecha_solicitud) : null)}
-      ${row("Fecha prometida", orden.fecha_prometida ? fmtDate(orden.fecha_prometida) : null, true)}
-    </table>
-  </div>
-
-  ${orden.notas ? `<div style="margin:0 28px 20px;padding:12px 14px;background:#f8fafc;border-radius:10px;border-left:3px solid #3b82f6;">
-    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin:0 0 4px;">Notas / Instrucciones</p>
-    <p style="font-size:13px;color:#334155;margin:0;line-height:1.6;">${esc(orden.notas)}</p>
-  </div>` : ""}
-
-  <div style="padding:14px 28px;background:#fafafa;border-top:1px solid #e2e8f0;display:flex;gap:32px;">
-    <div>
-      <p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin:0 0 3px;">Firma / Sello laboratorio</p>
-      <div style="width:160px;height:42px;border-bottom:1px solid #cbd5e1;margin-top:8px;"></div>
-    </div>
-    <div>
-      <p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin:0 0 3px;">Fecha de entrega real</p>
-      <div style="width:120px;height:42px;border-bottom:1px solid #cbd5e1;margin-top:8px;"></div>
-    </div>
-  </div>
-
-</div>
-<div class="no-print" style="padding:16px 0;display:flex;gap:10px;justify-content:center;">
-  <button onclick="window.print()" style="padding:10px 28px;background:#1e40af;color:white;border:none;border-radius:9px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;">Imprimir</button>
-  <button onclick="window.close()" style="padding:10px 24px;background:#f1f5f9;color:#475569;border:none;border-radius:9px;font-size:13px;cursor:pointer;font-family:inherit;">Cerrar</button>
-</div>
-</div></body></html>`;
-}
-
 // ─── meta ─────────────────────────────────────────────────────────────────────
 
 export function meta(): Route.MetaDescriptors {
@@ -510,11 +429,9 @@ function OrdenCard({
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   function handlePrint() {
-    const w = window.open("", "_blank", "width=600,height=800");
-    if (!w) { alert("Permite ventanas emergentes para imprimir"); return; }
-    w.document.write(buildOrdenHtml(orden));
-    w.document.close();
-    w.focus();
+    // la tablilla vive en su propia ruta, como la receta: ahí tiene el
+    // membrete de la clínica, los tamaños de papel y el modo sin membrete
+    window.open(`/ordenes-laboratorio/${orden.id}/imprimir?auto=1`, "_blank", "noopener");
   }
 
   useEffect(() => {

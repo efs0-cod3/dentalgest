@@ -4,7 +4,9 @@ import type { Route } from './+types/recetas.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { getSesion } from '~/lib/clinica.server'
 import { firmarImagen } from '~/lib/prescripciones.server'
-import { folioReceta, normalizarTamanoPapel, TAMANOS_PAPEL, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
+import { folioReceta, normalizarTamanoPapel, type SnapshotReceta, type TamanoPapel } from '~/lib/prescripciones'
+import { cssHoja, MEDIDAS } from '~/lib/hoja-impresa'
+import { BarraImpresion, AvisoMembrete, useDesplazamiento } from '~/components/HojaImpresa'
 
 // Vista de impresión de una receta.
 //
@@ -41,12 +43,6 @@ type RecetaImpresa = {
   prescripcion_items: ItemImpreso[]
 }
 
-// `size` va al @page; `ancho`/`alto` solo dibujan la vista previa en pantalla.
-const MEDIDAS: Record<TamanoPapel, { size: string; ancho: string; alto: string; etiqueta: string }> = {
-  'media-carta': { size: '5.5in 8.5in', ancho: '5.5in', alto: '8.5in', etiqueta: 'Media carta · 5.5 × 8.5 in' },
-  a5: { size: 'A5', ancho: '148mm', alto: '210mm', etiqueta: 'A5 · 148 × 210 mm' },
-  carta: { size: '8.5in 11in', ancho: '8.5in', alto: '11in', etiqueta: 'Carta · 8.5 × 11 in' },
-}
 
 export function meta({ data }: Route.MetaArgs): Route.MetaDescriptors {
   const receta = data?.receta as RecetaImpresa | null | undefined
@@ -120,28 +116,10 @@ function fmtFecha(iso: string) {
   return new Date(y, (m ?? 1) - 1, d ?? 1).toLocaleDateString('es-DO', { dateStyle: 'long' })
 }
 
-const CLAVE_DESPLAZAMIENTO = 'recetaDesplazamientoIn'
-
 export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
   const { receta, firmaUrl, selloUrl, logoUrl, qrDataUrl, clinicaNombre, papel, autoImprimir, conMembrete } = loaderData
 
-  // Cuánto bajar el contenido para que caiga debajo del membrete ya impreso
-  // del talonario. Es cosa de cada impresora y de cada talonario, así que se
-  // ajusta aquí y se recuerda; no tiene sentido fijarlo en el código.
-  const [desplazamiento, setDesplazamiento] = useState(1.9)
-  useEffect(() => {
-    // se lee después de montar para no romper la hidratación
-    try {
-      const guardado = localStorage.getItem(CLAVE_DESPLAZAMIENTO)
-      if (guardado !== null && Number.isFinite(Number(guardado))) setDesplazamiento(Number(guardado))
-    } catch { /* navegador sin almacenamiento: se queda el valor por defecto */ }
-  }, [])
-
-  function cambiarDesplazamiento(valor: number) {
-    const limitado = Math.min(6, Math.max(0, Number(valor.toFixed(2))))
-    setDesplazamiento(limitado)
-    try { localStorage.setItem(CLAVE_DESPLAZAMIENTO, String(limitado)) } catch { /* ídem */ }
-  }
+  const { desplazamiento, cambiarDesplazamiento } = useDesplazamiento()
 
   if (!receta) {
     return (
@@ -161,53 +139,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
   return (
     <>
       <style>{`
-        @page { size: ${MEDIDAS[papel].size}; margin: 0.45in; }
-        * { box-sizing: border-box; }
-        body { margin: 0; background: #f3f4f6; }
-        .receta-raiz { font-family: Georgia, 'Times New Roman', serif; color: #111827; }
-        .barra {
-          display: flex; gap: .5rem; justify-content: center; align-items: center;
-          padding: .9rem; background: #ffffff; border-bottom: 1px solid #e5e7eb;
-          font-family: system-ui, -apple-system, sans-serif;
-        }
-        .barra button, .barra a {
-          padding: .55rem 1.1rem; border-radius: .5rem; border: 1px solid #d1d5db;
-          background: #ffffff; color: #374151; font-size: .78rem; font-weight: 600;
-          cursor: pointer; text-decoration: none;
-        }
-        .barra button.primario { background: #1e40af; border-color: #1e40af; color: #ffffff; }
-        .barra a.actual { background: #eff6ff; border-color: #1e40af; color: #1e40af; }
-        .hoja {
-          /* z-index: 0 crea el contexto de apilado, que es lo que deja a la
-             marca de agua meterse DEBAJO del texto y por encima del blanco.
-             Sin él, un z-index negativo la escondería tras el fondo de la hoja. */
-          position: relative; z-index: 0;
-          width: ${MEDIDAS[papel].ancho};
-          min-height: ${MEDIDAS[papel].alto};
-          margin: 1.2rem auto; padding: .45in; background: #ffffff;
-          box-shadow: 0 1px 3px rgba(0,0,0,.18);
-        }
-        .hoja.sin-membrete { padding-top: calc(.45in + var(--desplazamiento, 0in)); }
-        .marca-agua {
-          /* al 44% y no al 50%: centrada en la hoja entera cae sobre la firma
-             y el rótulo asoma por debajo del pie, porque una receta corta deja
-             vacía la mitad de abajo. Así queda en el cuerpo, como el talonario. */
-          position: absolute; top: 44%; left: 50%;
-          transform: translate(-50%, -50%);
-          width: 56%; max-width: 3in; z-index: -1;
-          opacity: .07; pointer-events: none; user-select: none;
-          /* sin esto, los navegadores se comen la marca al imprimir */
-          -webkit-print-color-adjust: exact; print-color-adjust: exact;
-        }
-        .cabecera { display: flex; gap: .6rem; align-items: flex-start; border-bottom: 1.5px solid #111827; padding-bottom: .4rem; }
-        .cabecera img { max-height: 54px; max-width: 110px; object-fit: contain; }
-        .clinica-nombre { font-size: 1rem; font-weight: 700; line-height: 1.15; margin: 0; }
-        .clinica-datos { font-size: .62rem; color: #4b5563; line-height: 1.35; margin: .12rem 0 0; }
-        .paciente {
-          display: flex; flex-wrap: wrap; gap: .15rem 1.1rem;
-          font-size: .68rem; padding: .45rem 0; border-bottom: 1px solid #d1d5db;
-        }
-        .paciente b { font-weight: 700; }
+        ${cssHoja(papel)}
         .rx { font-size: 1.5rem; font-weight: 700; font-style: italic; margin: .5rem 0 .3rem; }
         ol.medicamentos { margin: 0; padding-left: 1.1rem; }
         ol.medicamentos li { margin-bottom: .5rem; font-size: .74rem; line-height: 1.4; }
@@ -216,101 +148,21 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
         .medicamento-nota { font-size: .66rem; color: #4b5563; font-style: italic; }
         .generales { margin-top: .7rem; font-size: .7rem; line-height: 1.45; }
         .generales-titulo { font-size: .6rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin-bottom: .1rem; }
-        .pie { margin-top: 2.4rem; display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; }
-        .firma-zona { flex: 1; max-width: 2.6in; }
-        /* La firma va en el flujo normal, encima de la raya, y no posicionada
-           desde abajo: así no depende de cuántas líneas de texto haya debajo
-           —si al doctor se le pone especialidad, la firma no se descoloca—.
-           El margen negativo la deja montada sobre la raya lo justo, que es
-           como se firma en papel. */
-        .firma-img { display: block; margin: 0 auto -.3rem; max-height: 56px; max-width: 2.2in; object-fit: contain; }
-        .firma-linea { border-top: 1px solid #111827; padding-top: .2rem; text-align: center; }
-        .firma-linea p { margin: 0; font-size: .64rem; line-height: 1.3; }
-        .firma-especialidad { color: #4b5563; font-style: italic; }
-        .sello-img { max-height: 1.1in; max-width: 1.1in; object-fit: contain; opacity: .9; }
-        .verificacion-qr {
-          display: flex; justify-content: flex-end; align-items: center; gap: .35rem;
-          margin-top: .55rem; font-family: system-ui, -apple-system, sans-serif;
-          color: #6b7280; font-size: .48rem; line-height: 1.2; text-align: right;
-        }
-        .verificacion-qr img { width: .62in; height: .62in; object-fit: contain; }
-        .controladas { margin-top: 1.1rem; font-size: .55rem; color: #6b7280; border-top: 1px dotted #d1d5db; padding-top: .25rem; }
-        .anulada-marca {
-          position: absolute; top: 42%; left: 50%;
-          transform: translate(-50%, -50%) rotate(-22deg);
-          font-size: ${papel === 'carta' ? '5rem' : '3.4rem'}; font-weight: 700;
-          color: rgba(190, 18, 60, .28); letter-spacing: .1em;
-          border: .22rem solid rgba(190, 18, 60, .28); padding: .1em .22em;
-          pointer-events: none; white-space: nowrap;
-        }
         .anulada-motivo {
           margin-top: .5rem; font-size: .62rem; color: #9f1239;
           border: 1px solid #fecdd3; background: #fff1f2; padding: .3rem .45rem; border-radius: .25rem;
         }
-        /* ─── modo sin membrete ───────────────────────────────────────────────
-           Para imprimir ENCIMA del talonario ya impreso de la clínica. Se
-           calla todo lo que el papel ya trae —logo, nombre, dirección, RNC,
-           la marca de agua, el Rx y la nota del pie—, y queda solo lo que
-           cambia en cada receta.
-
-           La raya de la firma y la firma escaneada también se van: el
-           talonario trae su propia línea y se firma a mano sobre el papel.
-           El nombre y el exequátur sí se imprimen, que son obligatorios. */
-        .sin-membrete .cabecera,
-        .sin-membrete .marca-agua,
-        .sin-membrete .rx,
-        .sin-membrete .controladas,
-        .sin-membrete .firma-img { display: none; }
-        .sin-membrete .firma-linea { border-top: none; }
-        .aviso-membrete {
-          margin: 0 auto 1rem; max-width: 34rem; text-align: center;
-          font-family: system-ui, -apple-system, sans-serif;
-          font-size: .72rem; color: #92400e;
-          background: #fffbeb; border: 1px solid #fde68a;
-          border-radius: .5rem; padding: .5rem .75rem;
-        }
-        @media print {
-          body { background: #ffffff; }
-          .no-print { display: none !important; }
-          .hoja { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; }
-          /* el desplazamiento para cuadrar con el talonario sí se imprime */
-          .hoja.sin-membrete { padding-top: var(--desplazamiento, 0); }
-        }
       `}</style>
 
-      <div className="receta-raiz">
-        <div className="barra no-print">
-          <button type="button" className="primario" onClick={() => window.print()}>Imprimir</button>
-          {TAMANOS_PAPEL.map(t => (
-            <a key={t} href={`?papel=${t}${conMembrete ? '' : '&membrete=0'}`}
-              className={t === papel ? 'actual' : undefined}>
-              {MEDIDAS[t].etiqueta}
-            </a>
-          ))}
-          <a href={`?papel=${papel}${conMembrete ? '&membrete=0' : ''}`}
-            className={conMembrete ? undefined : 'actual'}>
-            {conMembrete ? 'Sin membrete' : 'Con membrete'}
-          </a>
-          {!conMembrete && (
-            <label style={{ fontSize: '.72rem', color: '#4b5563', display: 'flex', alignItems: 'center', gap: '.35rem' }}>
-              Bajar
-              <input
-                type="number" step="0.1" min="0" max="6" value={desplazamiento}
-                onChange={e => cambiarDesplazamiento(Number(e.target.value))}
-                style={{ width: '4.2rem', padding: '.35rem .4rem', border: '1px solid #d1d5db', borderRadius: '.4rem', fontSize: '.75rem' }}
-              />
-              pulgadas
-            </label>
-          )}
-        </div>
+      <div className="hoja-raiz">
+        <BarraImpresion
+          papel={papel}
+          conMembrete={conMembrete}
+          desplazamiento={desplazamiento}
+          onDesplazamiento={cambiarDesplazamiento}
+        />
 
-        {!conMembrete && (
-          <p className="aviso-membrete no-print">
-            Modo sin membrete: sale solo lo que cambia en cada receta, para imprimir sobre
-            el talonario. Haz una prueba en una hoja en blanco y ponla a contraluz sobre el
-            talonario para cuadrar el «bajar».
-          </p>
-        )}
+        {!conMembrete && <AvisoMembrete papel={MEDIDAS[papel].etiqueta} />}
 
         <div
           className={conMembrete ? 'hoja' : 'hoja sin-membrete'}
@@ -319,7 +171,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
           {/* el logo de la clínica, al fondo y muy tenue, como el talonario */}
           <img className="marca-agua" src={logoHoja} alt="" aria-hidden="true" />
 
-          {anulada && <div className="anulada-marca">ANULADA</div>}
+          {anulada && <div className="sello-estado">ANULADA</div>}
 
           <div className="cabecera">
             <img src={logoHoja} alt="" />
@@ -336,7 +188,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
                 tienen valor legal. */}
           </div>
 
-          <div className="paciente">
+          <div className="encabezado-datos">
             <span><b>Paciente:</b> {s.paciente.nombre}</span>
             {s.paciente.edad !== null && <span><b>Edad:</b> {s.paciente.edad} años</span>}
             {s.paciente.cedula && <span><b>Cédula:</b> {s.paciente.cedula}</span>}
@@ -344,7 +196,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
             <span><b>Receta:</b> {folioReceta(receta.numero)}</span>
           </div>
 
-          <p className="rx">Rx</p>
+          <p className="rx solo-membrete">Rx</p>
 
           <ol className="medicamentos">
             {receta.prescripcion_items.map((it, i) => (
@@ -380,7 +232,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
               <div className="firma-linea">
                 <p>{s.doctor.nombre}</p>
                 {s.doctor.especialidad && (
-                  <p className="firma-especialidad">{s.doctor.especialidad}</p>
+                  <p className="firma-detalle">{s.doctor.especialidad}</p>
                 )}
                 <p>Exequátur: {s.doctor.exequatur || '____________'}</p>
               </div>
@@ -395,7 +247,7 @@ export default function RecetaImprimir({ loaderData }: Route.ComponentProps) {
             </div>
           )}
 
-          <p className="controladas">
+          <p className="nota-pie solo-membrete">
             Esta receta no es válida para sustancias controladas, que requieren el recetario oficial correspondiente.
           </p>
         </div>
