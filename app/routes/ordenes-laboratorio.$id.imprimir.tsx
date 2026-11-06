@@ -1,3 +1,4 @@
+import QRCode from 'qrcode'
 import type { Route } from './+types/ordenes-laboratorio.$id.imprimir'
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
@@ -20,6 +21,7 @@ import { BarraImpresion, AvisoMembrete, useDesplazamiento } from '~/components/H
 
 type OrdenImpresa = {
   id: string
+  verification_token: string
   titulo: string
   laboratorio: string | null
   tipo_trabajo: string | null
@@ -40,7 +42,6 @@ type ClinicaHoja = {
   email: string | null
   rnc: string | null
   logo_path: string | null
-  sello_path: string | null
 }
 
 export function meta({ data }: Route.MetaArgs): Route.MetaDescriptors {
@@ -65,7 +66,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const { data, error } = await supabase
     .from('ordenes_laboratorio')
-    .select('id,titulo,laboratorio,tipo_trabajo,color_dental,doctor,fecha_solicitud,fecha_prometida,fecha_entrega,estado,notas,pacientes(nombre)')
+    .select('id,verification_token,titulo,laboratorio,tipo_trabajo,color_dental,doctor,fecha_solicitud,fecha_prometida,fecha_entrega,estado,notas,pacientes(nombre)')
     .eq('id', params.id as string)
     .eq('clinica_id', clinicaId)
     .maybeSingle()
@@ -76,7 +77,7 @@ export async function loader({ request, params }: Route.LoaderArgs) {
   if (error) console.error('[orden-laboratorio/imprimir] la consulta falló:', error.message)
 
   const vacio = {
-    orden: null, clinica: null, logoUrl: null, selloUrl: null,
+    orden: null, clinica: null, logoUrl: null, qrDataUrl: null,
     papel, autoImprimir, conMembrete,
   }
   if (!data) return vacio
@@ -85,19 +86,27 @@ export async function loader({ request, params }: Route.LoaderArgs) {
 
   const { data: clinicaData } = await supabase
     .from('clinicas')
-    .select('nombre,direccion,telefono,email,rnc,logo_path,sello_path')
+    .select('nombre,direccion,telefono,email,rnc,logo_path')
     .eq('id', clinicaId)
     .maybeSingle()
 
   const clinica = (clinicaData as ClinicaHoja | null) ?? null
 
-  // las imágenes son privadas: se firman aquí, en el servidor, y por poco tiempo
-  const [logoUrl, selloUrl] = await Promise.all([
-    firmarImagen(supabase as any, clinica?.logo_path),
-    firmarImagen(supabase as any, clinica?.sello_path),
-  ])
+  // el logo es privado: se firma aquí, en el servidor, y por poco tiempo
+  const logoUrl = await firmarImagen(supabase as any, clinica?.logo_path)
 
-  return { orden, clinica, logoUrl, selloUrl, papel, autoImprimir, conMembrete }
+  // El QR lleva al supervisor del laboratorio a la orden sin pedirle cuenta.
+  // El host sale de la petición: así el enlace apunta al mismo dominio desde
+  // el que se imprimió.
+  const urlOrden = new URL(`/verificar-orden/${orden.id}?token=${orden.verification_token}`, request.url).toString()
+  const qrDataUrl = await QRCode.toDataURL(urlOrden, {
+    errorCorrectionLevel: 'M',
+    margin: 1,
+    width: 240,
+    color: { dark: '#111827', light: '#ffffff' },
+  })
+
+  return { orden, clinica, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete }
 }
 
 function fmtFecha(iso: string) {
@@ -107,7 +116,7 @@ function fmtFecha(iso: string) {
 }
 
 export default function OrdenLaboratorioImprimir({ loaderData }: Route.ComponentProps) {
-  const { orden, clinica, logoUrl, selloUrl, papel, autoImprimir, conMembrete } = loaderData
+  const { orden, clinica, logoUrl, qrDataUrl, papel, autoImprimir, conMembrete } = loaderData
   const { desplazamiento, cambiarDesplazamiento } = useDesplazamiento()
 
   if (!orden) {
@@ -225,15 +234,16 @@ export default function OrdenLaboratorioImprimir({ loaderData }: Route.Component
             </div>
           )}
 
-          <div className="pie">
-            <div className="firma-zona">
-              <div className="firma-linea">
-                <p>{orden.doctor ?? 'Doctor responsable'}</p>
-                <p className="firma-detalle">Indicaciones de la clínica</p>
-              </div>
+          {/* Sin firma del doctor ni sello: esto no es un documento que
+              certifique nada, es la hoja de trabajo que acompaña al encargo.
+              Quien firma aquí es el laboratorio, abajo, al recibirlo. */}
+
+          {qrDataUrl && (
+            <div className="verificacion-qr">
+              <span>Abre esta orden<br />en el teléfono</span>
+              <img src={qrDataUrl} alt="Código QR para abrir la orden" />
             </div>
-            {selloUrl && <img className="sello-img" src={selloUrl} alt="" />}
-          </div>
+          )}
 
           <div className="recibido">
             <div>
