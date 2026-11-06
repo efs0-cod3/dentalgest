@@ -18,6 +18,7 @@ export default [
   // fuera del layout del dashboard: la hoja impresa no lleva menú
   route('recetas/:id/imprimir', 'routes/recetas.$id.imprimir.tsx'),
   route('ordenes-laboratorio/:id/imprimir', 'routes/ordenes-laboratorio.$id.imprimir.tsx'),
+  route('trabajos-externos/:id/imprimir', 'routes/trabajos-externos.$id.imprimir.tsx'),
   route('verificar/:id', 'routes/verificar.$id.tsx'),
   route('verificar-trabajo/:id', 'routes/verificar-trabajo.$id.tsx'),
   route('verificar-factura/:id', 'routes/verificar-factura.$id.tsx'),

@@ -63,58 +63,9 @@ function printFooterButtons() {
 </div>`
 }
 
-export function buildTrabajoHtml(trabajo: TrabajoParaImprimir, qrDataUrl: string, clinicaNombre: string): string {
-  const folio = trabajo.id.slice(-8).toUpperCase()
-  const today = new Date().toLocaleDateString('es-DO', { dateStyle: 'long' })
-
-  return `<!DOCTYPE html><html lang="es"><head>
-<meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Ficha de trabajo #${folio} — ${esc(clinicaNombre)}</title>
-<script>window.onload=function(){setTimeout(function(){window.print()},500)}<\/script>
-<style>${printCss()}</style></head><body>
-<div style="max-width:520px;margin:0 auto;">
-<div style="background:white;border-radius:16px;overflow:hidden;box-shadow:0 6px 24px rgba(0,0,0,.10);">
-
-  <div style="background:linear-gradient(135deg,#1e40af,#3b82f6);padding:22px 28px;display:flex;justify-content:space-between;align-items:flex-start;">
-    <div>
-      <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;text-transform:uppercase;letter-spacing:.1em;">Ficha de trabajo externo</p>
-      <p style="color:white;font-size:18px;font-weight:800;margin:0 0 2px;">${esc(clinicaNombre)}</p>
-      <p style="color:rgba(255,255,255,.8);font-size:12px;margin:0;font-family:monospace;">Folio #${folio}</p>
-    </div>
-    <div style="text-align:right;">
-      <p style="color:rgba(255,255,255,.7);font-size:10px;margin:0 0 2px;">Fecha de impresión</p>
-      <p style="color:white;font-size:12px;font-weight:500;margin:0;">${today}</p>
-    </div>
-  </div>
-
-  <div style="padding:20px 28px;">
-    <p style="font-size:15px;font-weight:800;color:#0f172a;margin:0 0 16px;padding-bottom:12px;border-bottom:2px solid #e2e8f0;">${esc(trabajo.tipo_trabajo)}</p>
-    <table style="width:100%;border-collapse:collapse;">
-      ${row('Cliente externo', trabajo.clientes_externos?.nombre, true)}
-      ${row('Referencia del paciente', trabajo.paciente_referencia)}
-      ${row('Material', trabajo.material)}
-      ${row('Fecha de recibido', fmtDate(trabajo.fecha_recibido))}
-      ${row('Fecha prometida', trabajo.fecha_prometida ? fmtDate(trabajo.fecha_prometida) : null, true)}
-    </table>
-  </div>
-
-  ${trabajo.notas ? `<div style="margin:0 28px 20px;padding:12px 14px;background:#f8fafc;border-radius:10px;border-left:3px solid #3b82f6;">
-    <p style="font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin:0 0 4px;">Notas / Instrucciones</p>
-    <p style="font-size:13px;color:#334155;margin:0;line-height:1.6;">${esc(trabajo.notas)}</p>
-  </div>` : ''}
-
-  <div style="padding:14px 28px;background:#fafafa;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
-    ${qrBlock(qrDataUrl, 'Escanea para verificar la autenticidad de esta ficha')}
-    <div>
-      <p style="font-size:9px;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin:0 0 3px;">Firma / Sello</p>
-      <div style="width:140px;height:42px;border-bottom:1px solid #cbd5e1;margin-top:8px;"></div>
-    </div>
-  </div>
-
-</div>
-${printFooterButtons()}
-</div></body></html>`
-}
+// La ficha de trabajo se dibuja ahora en app/routes/trabajos-externos.$id.imprimir.tsx,
+// sobre la hoja compartida. Aquí solo queda la factura, que sigue siendo un
+// documento aparte con su propio formato.
 
 export function buildFacturaExternaHtml(
   factura: FacturaParaImprimir, trabajos: TrabajoParaImprimir[], qrDataUrl: string, clinicaNombre: string, clinicaRnc?: string | null
