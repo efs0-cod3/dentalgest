@@ -15,7 +15,7 @@ import { cn } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { WhatsappEnviar } from '~/components/WhatsappEnviar'
 import { MARCA_LAB } from '~/lib/marca'
-import { buildTrabajoHtml, buildFacturaExternaHtml } from '~/lib/trabajoExterno'
+import { buildFacturaExternaHtml } from '~/lib/trabajoExterno'
 
 // ─── types ────────────────────────────────────────────────────────────────────
 
@@ -803,15 +803,10 @@ function TrabajoDetalleModal({ trabajo, clienteTelefono, whatsappHabilitado, cli
     (trabajo.precio ? ` Precio: ${fmtMoney(Number(trabajo.precio))}.` : '') +
     ` Puede ver el detalle aquí: ${typeof window !== 'undefined' ? window.location.origin : ''}/verificar-trabajo/${trabajo.id}?token=${trabajo.verification_token}`
 
-  async function handlePrint() {
-    const w = window.open('', '_blank', 'width=600,height=800')
-    if (!w) { alert('Permite ventanas emergentes para imprimir'); return }
-    const QRCode = (await import('qrcode')).default
-    const qrUrl = `${window.location.origin}/verificar-trabajo/${trabajo.id}?token=${trabajo.verification_token}`
-    const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 120, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
-    w.document.write(buildTrabajoHtml(trabajo, qrDataUrl, clinicaNombre))
-    w.document.close()
-    w.focus()
+  function handlePrint() {
+    // la ficha vive en su propia ruta, como la receta y la tablilla: ahí
+    // tiene membrete, tamaños de papel y modo sin membrete
+    window.open(`/trabajos-externos/${trabajo.id}/imprimir?auto=1`, '_blank', 'noopener')
   }
 
   return createPortal(
@@ -933,15 +928,10 @@ function TrabajoCard({ trabajo, clinicaNombre, onView, onEdit }: {
   useCloseOnSubmit(() => setConfirmDelete(false))
   const { label, color, Icon } = estadoTrabajoConfig[trabajo.estado]
 
-  async function handlePrint() {
-    const w = window.open('', '_blank', 'width=600,height=800')
-    if (!w) { alert('Permite ventanas emergentes para imprimir'); return }
-    const QRCode = (await import('qrcode')).default
-    const qrUrl = `${window.location.origin}/verificar-trabajo/${trabajo.id}?token=${trabajo.verification_token}`
-    const qrDataUrl = await QRCode.toDataURL(qrUrl, { width: 120, margin: 1, color: { dark: '#1e293b', light: '#ffffff' } })
-    w.document.write(buildTrabajoHtml(trabajo, qrDataUrl, clinicaNombre))
-    w.document.close()
-    w.focus()
+  function handlePrint() {
+    // la ficha vive en su propia ruta, como la receta y la tablilla: ahí
+    // tiene membrete, tamaños de papel y modo sin membrete
+    window.open(`/trabajos-externos/${trabajo.id}/imprimir?auto=1`, '_blank', 'noopener')
   }
 
   function cambiarEstado(nuevoEstado: EstadoTrabajo) {
