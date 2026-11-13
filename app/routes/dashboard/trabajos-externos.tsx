@@ -11,7 +11,7 @@ import {
   Inbox, Clock, CheckCircle, Package, Calendar, Printer, Upload,
   DollarSign, Receipt, Wrench, Download,
 } from 'lucide-react'
-import { cn } from '~/lib/utils'
+import { cn, drDateKey, sumarDias } from '~/lib/utils'
 import { ConfirmDeleteModal } from '~/components/ConfirmDeleteModal'
 import { WhatsappEnviar } from '~/components/WhatsappEnviar'
 import { MARCA_LAB } from '~/lib/marca'
@@ -212,7 +212,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (intent === 'cambiar_estado_trabajo') {
     const nuevoEstado = fd.get('estado') as string
     const updates: Record<string, string | null> = { estado: nuevoEstado }
-    if (nuevoEstado === 'entregado') updates.fecha_entregado = new Date().toISOString().slice(0, 10)
+    if (nuevoEstado === 'entregado') updates.fecha_entregado = drDateKey()
     const { error } = await supabase.from('trabajos_externos').update(updates).eq('id', fd.get('id') as string).eq('clinica_id', clinicaId)
     if (error) return { ok: false, error: error.message, intent }
     return { ok: true }
@@ -225,7 +225,7 @@ export async function action({ request }: Route.ActionArgs) {
       tipo_trabajo: fd.get('tipo_trabajo') as string,
       material: (fd.get('material') as string) || null,
       notas: (fd.get('notas') as string) || null,
-      fecha_recibido: (fd.get('fecha_recibido') as string) || new Date().toISOString().slice(0, 10),
+      fecha_recibido: (fd.get('fecha_recibido') as string) || drDateKey(),
       fecha_prometida: (fd.get('fecha_prometida') as string) || null,
       precio: fd.get('precio') ? parseFloat(fd.get('precio') as string) : null,
     }
@@ -295,7 +295,7 @@ export async function action({ request }: Route.ActionArgs) {
       return { ok: false, error: 'No hay trabajos entregados sin facturar en ese período.', intent }
     }
     const total = elegibles.reduce((s, t) => s + (Number(t.precio) || 0), 0)
-    const fechaVencimiento = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10)
+    const fechaVencimiento = sumarDias(drDateKey(), 30)
     const { data: factura, error } = await supabase.from('facturas_externas').insert({
       clinica_id: clinicaId, cliente_externo_id: clienteId,
       periodo_inicio: periodoInicio, periodo_fin: periodoFin, total,
@@ -314,7 +314,7 @@ export async function action({ request }: Route.ActionArgs) {
       factura_id: facturaId,
       monto,
       metodo_pago: fd.get('metodo_pago') as string,
-      fecha: (fd.get('fecha') as string) || new Date().toISOString().slice(0, 10),
+      fecha: (fd.get('fecha') as string) || drDateKey(),
       notas: (fd.get('notas') as string) || null,
     })
     if (insertError) return { ok: false, error: insertError.message, intent }
@@ -323,7 +323,7 @@ export async function action({ request }: Route.ActionArgs) {
     const montoPagado = montoPagadoPrevio + monto
     const nuevoEstado = montoPagado >= total ? 'pagada' : 'parcial'
     const updates: Record<string, string> = { estado: nuevoEstado }
-    if (nuevoEstado === 'pagada') updates.fecha_pago = new Date().toISOString().slice(0, 10)
+    if (nuevoEstado === 'pagada') updates.fecha_pago = drDateKey()
     const { error: estadoErr } = await supabase.from('facturas_externas').update(updates).eq('id', facturaId).eq('clinica_id', clinicaId)
     if (estadoErr) return { ok: false, error: estadoErr.message, intent }
     return { ok: true, intent }
@@ -435,7 +435,7 @@ function GenerarFacturaModal({ cliente, trabajos, onClose }: {
 }) {
   const fetcher = useFetcher<typeof action>()
   const isSubmitting = fetcher.state !== 'idle'
-  const today = new Date().toISOString().slice(0, 10)
+  const today = drDateKey()
   const primerDiaMes = today.slice(0, 8) + '01'
   const [inicio, setInicio] = useState(primerDiaMes)
   const [fin, setFin] = useState(today)
@@ -698,7 +698,7 @@ function TrabajoFormModal({ trabajo, clientes, onClose }: {
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Fecha de recibido</label>
-              <input type="date" name="fecha_recibido" defaultValue={trabajo?.fecha_recibido ?? new Date().toISOString().slice(0, 10)}
+              <input type="date" name="fecha_recibido" defaultValue={trabajo?.fecha_recibido ?? drDateKey()}
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
             <div>
@@ -1089,7 +1089,7 @@ function AbonoFacturaModal({ factura, onClose }: { factura: FacturaExterna; onCl
 
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-1">Fecha</label>
-            <input type="date" name="fecha" defaultValue={new Date().toISOString().slice(0, 10)}
+            <input type="date" name="fecha" defaultValue={drDateKey()}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500" />
           </div>
 

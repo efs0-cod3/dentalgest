@@ -9,7 +9,7 @@ import {
   Plus, X, Pencil, Trash2, Clock, CheckCircle, Package,
   AlertTriangle, FlaskConical, Calendar, Printer,
 } from "lucide-react";
-import { cn, fmtMoney } from "~/lib/utils";
+import { cn, fmtMoney, drDateKey, drDiasHasta } from "~/lib/utils";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
 import { MARCA_LAB } from "~/lib/marca";
 
@@ -44,16 +44,15 @@ function fmtDate(iso: string) {
   return new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { dateStyle: "medium" });
 }
 const fmtMXN = fmtMoney;
+// Contra el día dominicano, no contra `new Date()`: el servidor corre en UTC
+// y desde las 8 PM de RD ya está en el día siguiente, así que una orden que
+// vencía hoy salía "Vencida" en el servidor y a tiempo en el navegador.
 function isPastDue(orden: OrdenLaboratorio): boolean {
   if (orden.estado === "entregado") return false;
   if (!orden.fecha_prometida) return false;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return new Date(orden.fecha_prometida + "T00:00:00") < today;
+  return orden.fecha_prometida < drDateKey();
 }
-function diasRestantes(fechaPrometida: string): number {
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  return Math.ceil((new Date(fechaPrometida + "T00:00:00").getTime() - today.getTime()) / 86400000);
-}
+const diasRestantes = drDiasHasta;
 
 const estadoConfig: Record<EstadoOrden, { label: string; color: string; Icon: any }> = {
   en_proceso: { label: "En proceso", color: "bg-blue-100 text-blue-700",   Icon: Clock },
@@ -137,7 +136,7 @@ export async function action({ request }: Route.ActionArgs) {
     const nuevoEstado = fd.get("estado") as string;
     const updates: Record<string, string | null> = { estado: nuevoEstado };
     if (nuevoEstado === "entregado") {
-      updates.fecha_entrega = new Date().toISOString().slice(0, 10);
+      updates.fecha_entrega = drDateKey();
     }
     const { error } = await supabase
       .from("ordenes_laboratorio")
@@ -156,7 +155,7 @@ export async function action({ request }: Route.ActionArgs) {
     tipo_trabajo: (fd.get("tipo_trabajo") as string) || null,
     color_dental: (fd.get("color_dental") as string) || null,
     doctor: (fd.get("doctor") as string) || null,
-    fecha_solicitud: (fd.get("fecha_solicitud") as string) || new Date().toISOString().slice(0, 10),
+    fecha_solicitud: (fd.get("fecha_solicitud") as string) || drDateKey(),
     fecha_prometida: (fd.get("fecha_prometida") as string) || null,
     notas: (fd.get("notas") as string) || null,
     // el rol laboratorio no ve ni edita importes: se omite el costo para no
@@ -178,7 +177,7 @@ export async function action({ request }: Route.ActionArgs) {
   if (estado) {
     updates.estado = estado;
     if (estado === "entregado") {
-      updates.fecha_entrega = new Date().toISOString().slice(0, 10);
+      updates.fecha_entrega = drDateKey();
     }
   }
 
@@ -340,7 +339,7 @@ function OrdenFormModal({
                 <input
                   type="date"
                   name="fecha_solicitud"
-                  defaultValue={orden?.fecha_solicitud ?? new Date().toISOString().slice(0, 10)}
+                  defaultValue={orden?.fecha_solicitud ?? drDateKey()}
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>

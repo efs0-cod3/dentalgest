@@ -29,6 +29,31 @@ export function drDateKey(input: string | Date | number = Date.now()): string {
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`
 }
 
+// Días de calendario dominicano entre hoy y una fecha 'YYYY-MM-DD'. Negativo
+// si ya pasó. Las dos puntas se anclan a medianoche UTC para que la cuenta no
+// dependa de la zona del entorno: en el servidor daba un día de más desde las
+// 8:00 PM de RD.
+export function drDiasHasta(fecha: string): number {
+  const hoy = Date.parse(drDateKey() + 'T00:00:00Z')
+  const otra = Date.parse(fecha.slice(0, 10) + 'T00:00:00Z')
+  return Math.round((otra - hoy) / 86_400_000)
+}
+
+// Fecha dominicana 'YYYY-MM-DD' a N días de hoy (N negativo mira hacia atrás).
+// Sumar milisegundos es exacto porque RD no cambia la hora en todo el año.
+export function drDateKeyMas(dias: number): string {
+  return drDateKey(Date.now() + dias * 86_400_000)
+}
+
+// Suma días a una fecha 'YYYY-MM-DD' cualquiera, no necesariamente hoy. Ancla
+// las dos puntas en UTC, así que da igual la zona del entorno: `new Date(fecha
+// + 'T00:00:00')` la interpretaría como hora local y el resultado dependería de
+// dónde corra.
+export function sumarDias(fecha: string, dias: number): string {
+  const base = Date.parse(fecha.slice(0, 10) + 'T00:00:00Z') + dias * 86_400_000
+  return new Date(base).toISOString().slice(0, 10)
+}
+
 // Partes del día dominicano, para comparar contra calendarios armados con
 // new Date(year, month, day) sin arrastrar la zona del entorno.
 export function drDateParts(input: string | Date | number = Date.now()) {

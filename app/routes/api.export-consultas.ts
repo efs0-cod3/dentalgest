@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { rowsToCsv } from '~/lib/csv'
-import { calcularEdad } from '~/lib/utils'
+import { calcularEdad, drDateKey } from '~/lib/utils'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
@@ -49,7 +49,7 @@ export async function loader({ request }: { request: Request }) {
   }))
 
   const csv = rowsToCsv(rows)
-  const fecha = new Date().toISOString().slice(0, 10)
+  const fecha = drDateKey()
 
   return new Response(csv, {
     headers: {

@@ -3,6 +3,7 @@ import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { fetchTodosLosDatos } from '~/lib/exportarTodo.server'
 import { rowsToCsv } from '~/lib/csv'
+import { drDateKey } from '~/lib/utils'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
@@ -16,7 +17,7 @@ export async function loader({ request }: { request: Request }) {
   }
 
   const contenido = await zip.generateAsync({ type: 'uint8array' })
-  const fecha = new Date().toISOString().slice(0, 10)
+  const fecha = drDateKey()
 
   return new Response(contenido as BodyInit, {
     headers: {
