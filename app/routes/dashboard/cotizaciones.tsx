@@ -22,7 +22,7 @@ import {
   Mail,
   Send,
 } from "lucide-react";
-import { cn, fmtMoney, convertirMoneda, type Moneda } from "~/lib/utils";
+import { cn, fmtMoney, convertirMoneda, drDateKey, drDateKeyMas, drDiasHasta, sumarDias, type Moneda } from "~/lib/utils";
 import { buildCotizacionHtml, fmtDate } from "~/lib/cotizacion";
 
 // ─── types ────────────────────────────────────────────────────────────────────
@@ -73,19 +73,16 @@ const METODOS = ["efectivo", "tarjeta", "transferencia"] as const;
 // ─── utils ────────────────────────────────────────────────────────────────────
 
 const fmt = fmtMoney;
+// Se compara contra el día dominicano, no contra `new Date()`: el servidor
+// corre en UTC y desde las 8 PM de RD ya está en el día siguiente, así que una
+// cotización que vencía hoy salía "vencida" en el servidor y "activa" en el
+// navegador. Comparar cadenas 'YYYY-MM-DD' ordena igual que las fechas.
 function computeEstado(c: Cotizacion): DisplayEstado {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const venc = new Date(c.fecha_vencimiento + "T00:00:00");
-  if (c.estado === "congelada") return venc < today ? "reevaluacion" : "congelada";
-  return venc < today ? "vencida" : "activa";
+  const vencida = c.fecha_vencimiento < drDateKey();
+  if (c.estado === "congelada") return vencida ? "reevaluacion" : "congelada";
+  return vencida ? "vencida" : "activa";
 }
-function diasRestantes(fechaVenc: string) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const venc = new Date(fechaVenc + "T00:00:00");
-  return Math.ceil((venc.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-}
+const diasRestantes = drDiasHasta;
 
 const estadoConfig: Record<DisplayEstado, { label: string; color: string; Icon: any }> = {
   activa:       { label: "Activa",       color: "bg-blue-100 text-blue-700",   Icon: Clock },
@@ -186,10 +183,8 @@ export async function action({ request }: Route.ActionArgs) {
     if (!cot) return { ok: false };
 
     const deposito = Math.round(cot.monto_total * 0.1 * 100) / 100;
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const venc = new Date();
-    venc.setDate(venc.getDate() + 20);
-    const vencStr = venc.toISOString().slice(0, 10);
+    const todayStr = drDateKey();
+    const vencStr = drDateKeyMas(20);
     const folio = id.slice(-8).toUpperCase();
 
     const [{ error: congelarErr }, { error: pagoErr }] = await Promise.all([
@@ -223,14 +218,12 @@ export async function action({ request }: Route.ActionArgs) {
 
   if (intent === "reactivar") {
     const id = fd.get("id") as string;
-    const venc = new Date();
-    venc.setDate(venc.getDate() + 20);
     const { error } = await supabase
       .from("cotizaciones")
       .update({
         estado: "activa",
-        fecha: new Date().toISOString().slice(0, 10),
-        fecha_vencimiento: venc.toISOString().slice(0, 10),
+        fecha: drDateKey(),
+        fecha_vencimiento: drDateKeyMas(20),
         monto_congelamiento: null,
         fecha_congelamiento: null,
       })
@@ -253,8 +246,9 @@ export async function action({ request }: Route.ActionArgs) {
 
   const montoTotal = items.reduce((s, i) => s + i.precio_total, 0);
   const fecha = fd.get("fecha") as string;
-  const venc = new Date(fecha + "T00:00:00");
-  venc.setDate(venc.getDate() + 20);
+  // 20 días desde la fecha del formulario, calculados sobre la cadena para que
+  // no dependan de la zona en la que corra el servidor
+  const vencimiento = sumarDias(fecha, 20);
 
   const moneda: Moneda = (fd.get("moneda") as string) === "USD" ? "USD" : "DOP";
   const tasaRaw = parseFloat(fd.get("tasa_cambio") as string);
@@ -269,7 +263,7 @@ export async function action({ request }: Route.ActionArgs) {
     titulo: (fd.get("titulo") as string) || null,
     doctor: (fd.get("doctor") as string) || null,
     fecha,
-    fecha_vencimiento: venc.toISOString().slice(0, 10),
+    fecha_vencimiento: vencimiento,
     notas: (fd.get("notas") as string) || null,
     monto_total: montoTotal,
     moneda,
@@ -626,7 +620,7 @@ function CotizacionFormModal({
                   defaultValue={
                     cotizacion
                       ? cotizacion.fecha
-                      : new Date().toISOString().slice(0, 10)
+                      : drDateKey()
                   }
                   className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />

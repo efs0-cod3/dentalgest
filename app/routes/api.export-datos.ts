@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from '~/lib/supabase.server'
 import { requireSeccion } from '~/lib/clinica.server'
 import { fetchTodosLosDatos } from '~/lib/exportarTodo.server'
+import { drDateKey } from '~/lib/utils'
 
 export async function loader({ request }: { request: Request }) {
   const { supabase } = createSupabaseServerClient(request)
@@ -13,7 +14,7 @@ export async function loader({ request }: { request: Request }) {
     ...datos,
   }
 
-  const fecha = new Date().toISOString().slice(0, 10)
+  const fecha = drDateKey()
 
   return new Response(JSON.stringify(payload, null, 2), {
     headers: {

@@ -23,7 +23,7 @@ import {
   Send,
   MessageCircle,
 } from "lucide-react";
-import { cn, fmtMoney, utcToDrLocal, convertirMoneda, type Moneda } from "~/lib/utils";
+import { cn, fmtMoney, utcToDrLocal, convertirMoneda, drDateKey, type Moneda } from "~/lib/utils";
 import { buildReciboHtml } from "~/lib/recibo";
 import type { DeudaRecibo } from "~/lib/recibo";
 import { ConfirmDeleteModal } from "~/components/ConfirmDeleteModal";
@@ -922,7 +922,7 @@ function AbonoModal({ deuda, onClose }: { deuda: Deuda; onClose: () => void }) {
             <input
               type="date"
               name="fecha"
-              defaultValue={new Date().toISOString().slice(0, 10)}
+              defaultValue={drDateKey()}
               className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -1157,9 +1157,9 @@ function PagoEditModal({
     pago?.tasa_cambio != null ? String(pago.tasa_cambio) : (tasaUsd != null ? String(tasaUsd) : "")
   );
   const [fecha, setFecha] = useState(
-    pago
-      ? new Date(pago.fecha).toISOString().slice(0, 10)
-      : new Date().toISOString().slice(0, 10),
+    // pagos.fecha es timestamptz: leerlo con toISOString() mostraba el día
+    // siguiente en los movimientos registrados después de las 8 PM
+    pago ? drDateKey(pago.fecha) : drDateKey(),
   );
   const [tipo, setTipo] = useState(pago?.tipo ?? "ingreso");
   // pago parcial: registrar el movimiento como abono a una cuenta por cobrar.
