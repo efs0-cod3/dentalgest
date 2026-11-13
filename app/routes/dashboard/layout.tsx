@@ -177,10 +177,14 @@ export default function DashboardLayout({ loaderData }: Route.ComponentProps) {
         collapsed ? 'w-16' : 'w-56'
       )}>
         {sidebarContent(undefined, collapsed)}
+        {/* El botón sobresale media anchura sobre la zona de contenido, y
+            justo ahí empieza la cabecera, que lleva z-20 y fondo sólido. Sin
+            el z-30 la cabecera le pasa por encima: esa mitad no se veía y
+            tampoco se podía pulsar. Queda por debajo del cajón móvil (z-40). */}
         <button
           onClick={toggleCollapsed}
           title={collapsed ? 'Expandir menú' : 'Colapsar menú'}
-          className="hidden md:flex items-center justify-center absolute top-6 -right-3 w-6 h-6 bg-white border border-gray-200 rounded-full text-gray-400 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
+          className="hidden md:flex items-center justify-center absolute top-6 -right-3 z-30 w-6 h-6 bg-white border border-gray-200 rounded-full text-gray-400 hover:text-gray-700 hover:border-gray-300 shadow-sm transition-colors"
         >
           {collapsed ? <ChevronRight size={13} /> : <ChevronLeft size={13} />}
         </button>
